@@ -1,0 +1,829 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================
+   INSTITUTIONAL DARK MODE + DEGEN CRYPTO PALETTE
+   ============================================ */
+
+:root {
+  /* Base palette - Deep institutional dark */
+  --background: #030303;
+  --background-elevated: #0a0a0c;
+  --background-subtle: #111114;
+  --foreground: #fafafa;
+  --foreground-muted: #a1a1aa;
+  
+  /* Card system with glassmorphism */
+  --card: rgba(255, 255, 255, 0.02);
+  --card-hover: rgba(255, 255, 255, 0.04);
+  --card-foreground: #fafafa;
+  
+  /* Accent colors - Bonk brand with neon energy */
+  --bonk: #FACC15;
+  --bonk-glow: rgba(250, 204, 21, 0.4);
+  --bonk-subtle: rgba(250, 204, 21, 0.1);
+  
+  /* Success/Danger - Vibrant trading colors */
+  --success: #00FF88;
+  --success-glow: rgba(0, 255, 136, 0.4);
+  --success-subtle: rgba(0, 255, 136, 0.1);
+  
+  --danger: #FF3B3B;
+  --danger-glow: rgba(255, 59, 59, 0.4);
+  --danger-subtle: rgba(255, 59, 59, 0.1);
+  
+  /* Additional accents */
+  --accent-blue: #3B82F6;
+  --accent-purple: #A855F7;
+  --accent-cyan: #06B6D4;
+  
+  /* Border system */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.12);
+  --border-active: rgba(250, 204, 21, 0.3);
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow-bonk: 0 0 40px rgba(250, 204, 21, 0.15), 0 0 80px rgba(250, 204, 21, 0.08);
+  --shadow-glow-success: 0 0 30px rgba(0, 255, 136, 0.2);
+  --shadow-glow-danger: 0 0 30px rgba(255, 59, 59, 0.2);
+  
+  /* Radius */
+  --radius: 6px; /* Existing radius */
+  --radius-sm: 4px; /* Existing radius-sm */
+  --radius-lg: 12px; /* Existing radius-lg */
+  --radius-xl: 16px; /* Existing radius-xl */
+
+  /* Input/Form */
+  --input: rgba(255, 255, 255, 0.04);
+  --input-focus: rgba(255, 255, 255, 0.08);
+  --ring: var(--bonk);
+  
+  /* Popover/Dialog */
+  --popover: #0a0a0c;
+  --popover-foreground: #fafafa;
+  
+  /* Charts */
+  --chart-1: var(--bonk);
+  --chart-2: var(--success);
+  --chart-3: var(--accent-blue);
+  --chart-4: var(--danger);
+  --chart-5: var(--accent-purple);
+
+  /* Shadcn/UI additional variables (defaulting to dark mode user colors) */
+  --primary: var(--bonk); /* Using existing --bonk as primary */
+  --primary-foreground: oklch(0.205 0 0); /* Shadcn default, adjust if needed */
+  --secondary: var(--background-subtle); /* Using existing subtle background */
+  --secondary-foreground: var(--foreground);
+  --muted: var(--background-subtle);
+  --muted-foreground: var(--foreground-muted);
+  --accent: var(--background-elevated);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--danger);
+  --destructive-foreground: oklch(0.637 0.237 25.331); /* Shadcn default, adjust if needed */
+  
+  --sidebar: var(--background-elevated); /* Using existing elevated background */
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--bonk);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: var(--background-subtle);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Shadcn light mode values as fallback for clarity, although our :root is dark */
+  /* These will be overridden by .dark block */
+  /* Default Shadcn values for light mode: */
+  /* --background: oklch(1 0 0); */
+  /* --foreground: oklch(0.145 0 0); */
+  /* --card: oklch(1 0 0); */
+  /* --card-foreground: oklch(0.145 0 0); */
+  /* --popover: oklch(1 0 0); */
+  /* --popover-foreground: oklch(0.145 0 0); */
+  /* --primary: oklch(0.205 0 0); */
+  /* --primary-foreground: oklch(0.985 0 0); */
+  /* --secondary: oklch(0.97 0 0); */
+  /* --secondary-foreground: oklch(0.205 0 0); */
+  /* --muted: oklch(0.97 0 0); */
+  /* --muted-foreground: oklch(0.556 0 0); */
+  /* --accent: oklch(0.97 0 0); */
+  /* --accent-foreground: oklch(0.205 0 0); */
+  /* --destructive: oklch(0.577 0.245 27.325); */
+  /* --destructive-foreground: oklch(0.577 0.245 27.325); */
+  /* --border: oklch(0.922 0 0); */
+  /* --input: oklch(0.922 0 0); */
+  /* --ring: oklch(0.708 0 0); */
+  /* --chart-1: oklch(0.646 0.222 41.116); */
+  /* --chart-2: oklch(0.6 0.118 184.704); */
+  /* --chart-3: oklch(0.398 0.07 227.392); */
+  /* --chart-4: oklch(0.828 0.189 84.429); */
+  /* --chart-5: oklch(0.769 0.188 70.08); */
+  /* --radius: 0.625rem; */
+  /* --sidebar: oklch(0.985 0 0); */
+  /* --sidebar-foreground: oklch(0.145 0 0); */
+  /* --sidebar-primary: oklch(0.205 0 0); */
+  /* --sidebar-primary-foreground: oklch(0.985 0 0); */
+  /* --sidebar-accent: oklch(0.97 0 0); */
+  /* --sidebar-accent-foreground: oklch(0.205 0 0); */
+  /* --sidebar-border: oklch(0.922 0 0); */
+  /* --sidebar-ring: oklch(0.708 0 0); */
+}
+ 
+/* Shadcn/UI dark mode overrides, preserving user's dark palette */
+.dark {
+  --background: #030303; /* Preserved from user's :root */
+  --foreground: #fafafa; /* Preserved from user's :root */
+  --card: rgba(255, 255, 255, 0.02); /* Preserved from user's :root */
+  --card-foreground: #fafafa; /* Preserved from user's :root */
+  --popover: #0a0a0c; /* Preserved from user's :root */
+  --popover-foreground: #fafafa; /* Preserved from user's :root */
+
+  --primary: var(--bonk); /* Using existing --bonk as primary */
+  --primary-foreground: oklch(0.205 0 0); /* Shadcn default, adjust if needed */
+  --secondary: var(--background-subtle); /* Using existing subtle background */
+  --secondary-foreground: var(--foreground);
+  --muted: var(--background-subtle);
+  --muted-foreground: var(--foreground-muted);
+  --accent: var(--background-elevated);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--danger);
+  --destructive-foreground: oklch(0.637 0.237 25.331); /* Shadcn default, adjust if needed */
+
+  --border: rgba(255, 255, 255, 0.06); /* Preserved from user's :root */
+  --input: rgba(255, 255, 255, 0.04); /* Preserved from user's :root */
+  --ring: var(--bonk); /* Preserved from user's :root */
+
+  /* Shadcn dark mode chart colors (will override light mode defaults from :root if applied) */
+  --chart-1: var(--bonk); /* Using user's chart-1 */
+  --chart-2: var(--success); /* Using user's chart-2 */
+  --chart-3: var(--accent-blue); /* Using user's chart-3 */
+  --chart-4: var(--danger); /* Using user's chart-4 */
+  --chart-5: var(--accent-purple); /* Using user's chart-5 */
+
+  --radius: 6px; /* Preserved from user's :root */
+
+  --sidebar: var(--background-elevated);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--bonk);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: var(--background-subtle);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Original Shadcn dark mode values as reference: */
+  /* --background: oklch(0.145 0 0); */
+  /* --foreground: oklch(0.985 0 0); */
+  /* --card: oklch(0.145 0 0); */
+  /* --card-foreground: oklch(0.985 0 0); */
+  /* --popover: oklch(0.145 0 0); */
+  /* --popover-foreground: oklch(0.985 0 0); */
+  /* --primary: oklch(0.985 0 0); */
+  /* --primary-foreground: oklch(0.205 0 0); */
+  /* --secondary: oklch(0.269 0 0); */
+  /* --secondary-foreground: oklch(0.985 0 0); */
+  /* --muted: oklch(0.269 0 0); */
+  /* --muted-foreground: oklch(0.708 0 0); */
+  /* --accent: oklch(0.269 0 0); */
+  /* --accent-foreground: oklch(0.985 0 0); */
+  /* --destructive: oklch(0.396 0.141 25.723); */
+  /* --destructive-foreground: oklch(0.637 0.237 25.331); */
+  /* --border: oklch(0.269 0 0); */
+  /* --input: oklch(0.269 0 0); */
+  /* --ring: oklch(0.439 0 0); */
+  /* --chart-1: oklch(0.488 0.243 264.376); */
+  /* --chart-2: oklch(0.696 0.17 162.48); */
+  /* --chart-3: oklch(0.769 0.188 70.08); */
+  /* --chart-4: oklch(0.627 0.265 303.9); */
+  /* --chart-5: oklch(0.645 0.246 16.439); */
+  /* --sidebar: oklch(0.205 0 0); */
+  /* --sidebar-foreground: oklch(0.985 0 0); */
+  /* --sidebar-primary: oklch(0.488 0.243 264.376); */
+  /* --sidebar-primary-foreground: oklch(0.985 0 0); */
+  /* --sidebar-accent: oklch(0.269 0 0); */
+  /* --sidebar-accent-foreground: oklch(0.985 0 0); */
+  /* --sidebar-border: oklch(0.269 0 0); */
+  /* --sidebar-ring: oklch(0.439 0 0); */
+}
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --font-display: "Space Grotesk", "Inter", sans-serif;
+  
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  
+  /* Shadcn/UI additions to @theme inline */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  /* Custom colors (preserved) */
+  --color-bonk: var(--bonk);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-muted-foreground: var(--foreground-muted);
+  --color-muted: rgba(255, 255, 255, 0.06);
+
+  /* Chart colors */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Radius mapping for Shadcn to user's values */
+  --radius-sm: var(--radius-sm); /* Matches existing --radius-sm */
+  --radius-md: calc(var(--radius) - 2px); /* Shadcn default, mapping to user --radius */
+  --radius-lg: var(--radius-lg); /* Matches existing --radius-lg */
+  --radius-xl: var(--radius-xl); /* Matches existing --radius-xl */
+
+  /* Sidebar colors */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50; /* Added outline-ring/50 from shadcn */
+  }
+  
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    background: #030303; /* Existing explicit background */
+    min-height: 100vh;
+  }
+  
+  ::selection {
+    background: rgba(250, 204, 21, 0.3);
+    color: #fafafa;
+  }
+}
+
+/* ============================================
+   GLASSMORPHISM CARDS
+   ============================================ */
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-lg);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.glass-card-elevated {
+  background: rgba(8, 8, 10, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.glass-card-solid {
+  background: rgba(17, 17, 20, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-lg);
+}
+
+/* Premium gradient border effect */
+.glass-card-premium {
+  position: relative;
+  background: rgba(10, 10, 12, 0.9);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.glass-card-premium::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    135deg,
+    rgba(250, 204, 21, 0.4) 0%,
+    rgba(250, 204, 21, 0.1) 25%,
+    transparent 50%
+  );
+  -webkit-mask: 
+    linear-gradient(#fff 0 0) content-box, 
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ============================================
+   GLOW EFFECTS - ENHANCED FOR DEGEN VIBES
+   ============================================ */
+
+.glow-bonk {
+  box-shadow: 
+    var(--shadow-glow-bonk),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  position: relative;
+}
+
+.glow-bonk::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.4), transparent 50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.glow-bonk:hover::after {
+  opacity: 1;
+}
+
+.glow-success {
+  box-shadow: 
+    var(--shadow-glow-success),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.glow-danger {
+  box-shadow: 
+    var(--shadow-glow-danger),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.text-glow-bonk {
+  text-shadow: 
+    0 0 10px rgba(250, 204, 21, 0.8), 
+    0 0 20px rgba(250, 204, 21, 0.6), 
+    0 0 40px rgba(250, 204, 21, 0.4),
+    0 0 80px rgba(250, 204, 21, 0.2);
+}
+
+.text-glow-success {
+  text-shadow: 
+    0 0 10px rgba(0, 255, 136, 0.8), 
+    0 0 20px rgba(0, 255, 136, 0.6), 
+    0 0 40px rgba(0, 255, 136, 0.4);
+}
+
+.text-glow-danger {
+  text-shadow: 
+    0 0 10px rgba(255, 59, 59, 0.8), 
+    0 0 20px rgba(255, 59, 59, 0.6), 
+    0 0 40px rgba(255, 59, 59, 0.4);
+}
+
+/* ============================================
+   ANIMATED BACKGROUNDS
+   ============================================ */
+
+/* Mesh gradient animation */
+@keyframes mesh-float {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.6;
+  }
+  33% {
+    transform: translate(30px, -20px) scale(1.05);
+    opacity: 0.8;
+  }
+  66% {
+    transform: translate(-20px, 30px) scale(0.95);
+    opacity: 0.5;
+  }
+}
+
+.mesh-gradient {
+  animation: mesh-float 25s ease-in-out infinite;
+}
+
+/* Noise/grain overlay */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.025;
+  z-index: 9999;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+}
+
+/* Scanline effect for extra degen vibes */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.1) 2px,
+    rgba(0, 0, 0, 0.1) 4px
+  );
+}
+
+/* ============================================
+   STATUS INDICATORS
+   ============================================ */
+
+@keyframes pulse-live {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.status-dot {
+  position: relative;
+}
+
+.status-dot::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+.status-dot-live::before {
+  background: var(--success);
+}
+
+.status-dot-error::before {
+  background: var(--danger);
+}
+
+.status-dot-syncing::before {
+  background: var(--bonk);
+}
+
+/* ============================================
+   CARD HOVER EFFECTS
+   ============================================ */
+
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 20px rgba(250, 204, 21, 0.05);
+}
+
+/* Elite card for top performers */
+.elite-card {
+  position: relative;
+}
+
+.elite-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: linear-gradient(
+    135deg,
+    rgba(250, 204, 21, 0.5) 0%,
+    rgba(250, 204, 21, 0.2) 30%,
+    transparent 70%
+  );
+  border-radius: calc(var(--radius-lg) + 2px);
+  z-index: -1;
+  opacity: 0;
+  filter: blur(8px);
+  transition: opacity 0.3s ease;
+}
+
+.elite-card:hover::before {
+  opacity: 1;
+}
+
+/* ============================================
+   TABLE ROW EFFECTS
+   ============================================ */
+
+.row-hover {
+  transition: all 0.2s ease;
+  border-left: 3px solid transparent;
+}
+
+.row-hover:hover {
+  background: rgba(250, 204, 21, 0.03);
+  border-left-color: var(--bonk);
+}
+
+.row-hot {
+  background: rgba(255, 59, 59, 0.03);
+  border-left: 3px solid var(--danger);
+}
+
+.row-hot:hover {
+  background: rgba(255, 59, 59, 0.06);
+}
+
+/* ============================================
+   LIQUIDITY BAR
+   ============================================ */
+
+.liq-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.liq-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--success) 0%, var(--bonk) 100%);
+  transition: width 0.5s ease;
+}
+
+/* ============================================
+   PRICE CHANGE ANIMATIONS
+   ============================================ */
+
+@keyframes price-flash-up {
+  0% {
+    background: rgba(0, 255, 136, 0.3);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@keyframes price-flash-down {
+  0% {
+    background: rgba(255, 59, 59, 0.3);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.price-up {
+  animation: price-flash-up 1s ease-out;
+}
+
+.price-down {
+  animation: price-flash-down 1s ease-out;
+}
+
+/* ============================================
+   NEON BADGE PULSE
+   ============================================ */
+
+@keyframes neon-pulse {
+  0%, 100% {
+    box-shadow: 0 0 5px currentColor, 0 0 10px currentColor;
+  }
+  50% {
+    box-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
+  }
+}
+
+.badge-neon {
+  animation: neon-pulse 2s ease-in-out infinite;
+}
+
+.badge-new {
+  color: var(--success);
+  background: rgba(0, 255, 136, 0.15);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.badge-hot {
+  color: var(--danger);
+  background: rgba(255, 59, 59, 0.15);
+  border: 1px solid rgba(255, 59, 59, 0.3);
+}
+
+/* ============================================
+   STAGGER ANIMATIONS
+   ============================================ */
+
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-item {
+  animation: stagger-in 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  opacity: 0;
+}
+
+.stagger-item:nth-child(1) { animation-delay: 0ms; }
+.stagger-item:nth-child(2) { animation-delay: 50ms; }
+.stagger-item:nth-child(3) { animation-delay: 100ms; }
+.stagger-item:nth-child(4) { animation-delay: 150ms; }
+.stagger-item:nth-child(5) { animation-delay: 200ms; }
+.stagger-item:nth-child(6) { animation-delay: 250ms; }
+
+/* ============================================
+   SKELETON LOADING
+   ============================================ */
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================
+   DRAWER/MODAL ANIMATIONS
+   ============================================ */
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.slide-drawer {
+  animation: slide-in-right 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.backdrop-fade {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* ============================================
+   SCROLLBAR STYLING
+   ============================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(250, 204, 21, 0.3);
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ============================================
+   FOCUS STATES
+   ============================================ */
+
+*:focus-visible {
+  outline: 2px solid var(--bonk);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--bonk);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   MARQUEE/TICKER ANIMATION
+   ============================================ */
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* ============================================
+   NUMBER COUNTER ANIMATION
+   ============================================ */
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================
+   RESPONSIVE UTILITIES
+   ============================================ */
+
+@media (max-width: 768px) {
+  .glass-card,
+  .glass-card-solid,
+  .glass-card-elevated {
+    border-radius: var(--radius);
+  }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+  .grain-overlay,
+  .mesh-gradient {
+    display: none;
+  }
+}
