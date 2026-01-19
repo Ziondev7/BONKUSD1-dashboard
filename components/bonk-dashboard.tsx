@@ -2,11 +2,17 @@
 
 import { useState, useCallback, useMemo, useRef } from "react"
 import { motion } from "framer-motion"
+import dynamic from "next/dynamic"
 import { useTokens, useFavorites, useSoundPreference } from "@/hooks/use-tokens"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { sanitizeSearchInput } from "@/lib/utils"
-import { FloatingNav } from "./dashboard/floating-nav"
 import { MetricsGrid } from "./dashboard/metrics-grid"
+
+// Dynamic import FloatingNav with SSR disabled to prevent hydration mismatch
+// (status indicator depends on client-side data fetching)
+const FloatingNav = dynamic(() => import("./dashboard/floating-nav").then(mod => ({ default: mod.FloatingNav })), {
+  ssr: false,
+})
 import { VolumeEvolution } from "./dashboard/volume-evolution"
 import { TopPerformers } from "./dashboard/top-performers"
 import { TokenFilters } from "./dashboard/token-filters"
