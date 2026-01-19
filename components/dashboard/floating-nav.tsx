@@ -44,6 +44,12 @@ export function FloatingNav({
 }: FloatingNavProps) {
   const [scrolled, setScrolled] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  // Prevent hydration mismatch by only rendering dynamic content after mount
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     let ticking = false
@@ -117,40 +123,46 @@ export function FloatingNav({
               <span className="text-bonk text-glow-bonk">USD1</span>
             </button>
 
-            {/* Live Status */}
+            {/* Live Status - use stable default until mounted to prevent hydration mismatch */}
             <div className="hidden md:flex items-center gap-3 border-l border-white/10 pl-4">
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06]">
                 <div className="relative">
                   <div
                     className={`w-2 h-2 rounded-full ${
-                      status.type === "live"
-                        ? "bg-success"
-                        : status.type === "error"
-                          ? "bg-danger"
-                          : "bg-bonk"
+                      !mounted
+                        ? "bg-bonk"
+                        : status.type === "live"
+                          ? "bg-success"
+                          : status.type === "error"
+                            ? "bg-danger"
+                            : "bg-bonk"
                     }`}
                   />
                   <div
                     className={`absolute inset-0 rounded-full animate-ping ${
-                      status.type === "live"
-                        ? "bg-success"
-                        : status.type === "error"
-                          ? "bg-danger"
-                          : "bg-bonk"
+                      !mounted
+                        ? "bg-bonk"
+                        : status.type === "live"
+                          ? "bg-success"
+                          : status.type === "error"
+                            ? "bg-danger"
+                            : "bg-bonk"
                     }`}
                     style={{ animationDuration: "2s" }}
                   />
                 </div>
                 <span
                   className={`text-[10px] font-bold tracking-[0.15em] uppercase ${
-                    status.type === "live"
-                      ? "text-success"
-                      : status.type === "error"
-                        ? "text-danger"
-                        : "text-bonk"
+                    !mounted
+                      ? "text-bonk"
+                      : status.type === "live"
+                        ? "text-success"
+                        : status.type === "error"
+                          ? "text-danger"
+                          : "text-bonk"
                   }`}
                 >
-                  {status.type === "live" ? "LIVE" : status.type === "error" ? "OFFLINE" : "SYNCING"}
+                  {!mounted ? "SYNCING" : status.type === "live" ? "LIVE" : status.type === "error" ? "OFFLINE" : "SYNCING"}
                 </span>
               </div>
             </div>
@@ -192,8 +204,8 @@ export function FloatingNav({
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2 md:gap-3">
-            {/* Last Update Time */}
-            {lastRefresh && (
+            {/* Last Update Time - only show after mount to prevent hydration mismatch */}
+            {mounted && lastRefresh && (
               <span className="hidden lg:block text-[10px] text-white/30 font-mono">
                 {lastRefresh.toLocaleTimeString()}
               </span>
