@@ -123,46 +123,43 @@ export function FloatingNav({
               <span className="text-bonk text-glow-bonk">USD1</span>
             </button>
 
-            {/* Live Status - use stable default until mounted to prevent hydration mismatch */}
-            <div className="hidden md:flex items-center gap-3 border-l border-white/10 pl-4">
+            {/* Live Status - suppressHydrationWarning since status can differ between server/client */}
+            <div className="hidden md:flex items-center gap-3 border-l border-white/10 pl-4" suppressHydrationWarning>
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06]">
                 <div className="relative">
                   <div
+                    suppressHydrationWarning
                     className={`w-2 h-2 rounded-full ${
-                      !mounted
-                        ? "bg-bonk"
-                        : status.type === "live"
-                          ? "bg-success"
-                          : status.type === "error"
-                            ? "bg-danger"
-                            : "bg-bonk"
+                      status.type === "live"
+                        ? "bg-success"
+                        : status.type === "error"
+                          ? "bg-danger"
+                          : "bg-bonk"
                     }`}
                   />
                   <div
+                    suppressHydrationWarning
                     className={`absolute inset-0 rounded-full animate-ping ${
-                      !mounted
-                        ? "bg-bonk"
-                        : status.type === "live"
-                          ? "bg-success"
-                          : status.type === "error"
-                            ? "bg-danger"
-                            : "bg-bonk"
+                      status.type === "live"
+                        ? "bg-success"
+                        : status.type === "error"
+                          ? "bg-danger"
+                          : "bg-bonk"
                     }`}
                     style={{ animationDuration: "2s" }}
                   />
                 </div>
                 <span
+                  suppressHydrationWarning
                   className={`text-[10px] font-bold tracking-[0.15em] uppercase ${
-                    !mounted
-                      ? "text-bonk"
-                      : status.type === "live"
-                        ? "text-success"
-                        : status.type === "error"
-                          ? "text-danger"
-                          : "text-bonk"
+                    status.type === "live"
+                      ? "text-success"
+                      : status.type === "error"
+                        ? "text-danger"
+                        : "text-bonk"
                   }`}
                 >
-                  {!mounted ? "SYNCING" : status.type === "live" ? "LIVE" : status.type === "error" ? "OFFLINE" : "SYNCING"}
+                  {status.type === "live" ? "LIVE" : status.type === "error" ? "OFFLINE" : "SYNCING"}
                 </span>
               </div>
             </div>
