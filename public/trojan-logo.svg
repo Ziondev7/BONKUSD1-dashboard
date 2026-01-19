@@ -1,0 +1,6 @@
+<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M20 2C18 2 16 4 15 6C14 8 13 10 12 12C11 14 10 16 10 18C10 22 12 26 14 28C16 30 18 32 18 34C18 36 17 38 16 38C18 38 20 36 22 34C24 32 26 30 28 28C30 26 32 22 32 18C32 16 31 14 30 12C29 10 28 8 27 6C26 4 24 2 22 2C21 2 20.5 2.5 20 3C19.5 2.5 19 2 18 2H20Z" fill="currentColor"/>
+  <path d="M16 8C16 8 18 10 20 10C22 10 24 8 24 8C24 10 22 12 20 12C18 12 16 10 16 8Z" fill="currentColor" opacity="0.6"/>
+  <circle cx="17" cy="14" r="1.5" fill="currentColor"/>
+  <path d="M12 20C12 20 14 18 16 18C18 18 20 20 20 22C20 20 22 18 24 18C26 18 28 20 28 20" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.4"/>
+</svg>
