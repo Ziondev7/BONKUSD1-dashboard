@@ -42,10 +42,26 @@ interface KVModule {
 }
 
 /**
+ * Validate URL format for Vercel KV
+ */
+function isValidKVUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+/**
  * Dynamically load Vercel KV if available
  */
 async function getKV(): Promise<KVModule["kv"] | null> {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+  const kvUrl = process.env.KV_REST_API_URL
+  const kvToken = process.env.KV_REST_API_TOKEN
+
+  // Check if credentials exist and URL is valid
+  if (!kvUrl || !kvToken || !isValidKVUrl(kvUrl)) {
     return null
   }
 
