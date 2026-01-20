@@ -256,16 +256,18 @@ async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
 }
 
 /**
- * Fetch USD1 pools from GeckoTerminal as fallback (with pagination)
+ * Fetch ALL USD1 pools from GeckoTerminal with full pagination
  */
 async function fetchPoolsFromGeckoTerminal(limit: number): Promise<Pool[]> {
-  console.log("[Backfill] Trying GeckoTerminal fallback...")
+  console.log("[Backfill] Fetching ALL pools from GeckoTerminal...")
 
   const pools: Pool[] = []
-  const maxPages = Math.ceil(limit / 20) // GeckoTerminal returns 20 per page
+  const maxPages = 50 // GeckoTerminal allows up to 50 pages (1000 pools max)
 
-  for (let page = 1; page <= maxPages && pools.length < limit; page++) {
+  for (let page = 1; page <= maxPages; page++) {
     const url = `${GECKOTERMINAL_API}/networks/solana/tokens/${USD1_MINT}/pools?page=${page}`
+    console.log(`[Backfill] GeckoTerminal page ${page}...`)
+
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
     })
@@ -280,12 +282,13 @@ async function fetchPoolsFromGeckoTerminal(limit: number): Promise<Pool[]> {
     const data = await response.json()
     const geckoPools: GeckoPool[] = data.data || []
 
-    if (geckoPools.length === 0) break // No more pages
+    if (geckoPools.length === 0) {
+      console.log(`[Backfill] No more pools on page ${page}, stopping pagination`)
+      break
+    }
 
     // Convert GeckoTerminal format to our Pool format
     for (const gp of geckoPools) {
-      if (pools.length >= limit) break
-
       const poolAddress = gp.attributes.address
       const poolName = gp.attributes.name || ""
 
@@ -398,42 +401,69 @@ async function fetchPoolsFromDexScreener(limit: number): Promise<Pool[]> {
 }
 
 /**
- * Try to fetch pools from multiple sources (Raydium -> DexScreener -> GeckoTerminal)
+ * Fetch ALL pools from multiple sources and combine them (no duplicates)
  */
 async function fetchPools(limit: number): Promise<Pool[]> {
-  // Try Raydium first (most accurate for BONK.fun)
+  const allPools = new Map<string, Pool>() // Use Map to deduplicate by pool address
+
+  // Try DexScreener first (usually has many pools)
   try {
-    const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=${limit}`
+    console.log("[Backfill] Fetching from DexScreener...")
+    const dexPools = await fetchPoolsFromDexScreener(9999) // Get all, not limited
+    for (const pool of dexPools) {
+      allPools.set(pool.id, pool)
+    }
+    console.log(`[Backfill] DexScreener: ${dexPools.length} pools`)
+  } catch (error) {
+    console.log(`[Backfill] DexScreener failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
+
+  // Also try GeckoTerminal (might have different pools indexed)
+  try {
+    console.log("[Backfill] Fetching from GeckoTerminal...")
+    const geckoPools = await fetchPoolsFromGeckoTerminal(9999) // Get all, not limited
+    let newFromGecko = 0
+    for (const pool of geckoPools) {
+      if (!allPools.has(pool.id)) {
+        allPools.set(pool.id, pool)
+        newFromGecko++
+      }
+    }
+    console.log(`[Backfill] GeckoTerminal: ${geckoPools.length} pools (${newFromGecko} new)`)
+  } catch (error) {
+    console.log(`[Backfill] GeckoTerminal failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
+
+  // Also try Raydium (might have additional pools)
+  try {
+    console.log("[Backfill] Fetching from Raydium...")
+    const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=500`
     const poolsResponse = await fetchWithRetry(poolsUrl)
     const poolsData = await poolsResponse.json()
 
     if (poolsData.success && poolsData.data?.data?.length > 0) {
-      console.log(`[Backfill] Got ${poolsData.data.data.length} pools from Raydium`)
-      return poolsData.data.data
+      let newFromRaydium = 0
+      for (const pool of poolsData.data.data) {
+        if (!allPools.has(pool.id)) {
+          allPools.set(pool.id, pool)
+          newFromRaydium++
+        }
+      }
+      console.log(`[Backfill] Raydium: ${poolsData.data.data.length} pools (${newFromRaydium} new)`)
     }
   } catch (error) {
     console.log(`[Backfill] Raydium failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
-  // Try DexScreener (usually has more pools indexed)
-  try {
-    const pools = await fetchPoolsFromDexScreener(limit)
-    if (pools.length > 0) {
-      console.log(`[Backfill] Got ${pools.length} pools from DexScreener`)
-      return pools
-    }
-  } catch (error) {
-    console.log(`[Backfill] DexScreener failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  const pools = Array.from(allPools.values())
+  console.log(`[Backfill] Total unique pools found: ${pools.length}`)
+
+  if (pools.length === 0) {
+    throw new Error("No USD1 pools found from any source")
   }
 
-  // Fallback to GeckoTerminal
-  try {
-    const pools = await fetchPoolsFromGeckoTerminal(limit)
-    console.log(`[Backfill] Got ${pools.length} pools from GeckoTerminal`)
-    return pools
-  } catch (error) {
-    throw new Error(`All APIs failed (Raydium, DexScreener, GeckoTerminal). Last error: ${error instanceof Error ? error.message : 'Unknown'}`)
-  }
+  // Apply limit if specified (0 means no limit)
+  return limit > 0 ? pools.slice(0, limit) : pools
 }
 
 export async function POST(request: NextRequest) {
@@ -454,8 +484,8 @@ export async function POST(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url)
-  const poolLimit = parseInt(searchParams.get("poolLimit") || "50")
-  const daysBack = parseInt(searchParams.get("daysBack") || "30")
+  const poolLimit = parseInt(searchParams.get("poolLimit") || "0") // 0 = no limit, fetch ALL pools
+  const daysBack = parseInt(searchParams.get("daysBack") || "0")   // 0 = fetch ALL history
 
   const results: { pool: string; status: string; snapshots?: number; error?: string }[] = []
 
@@ -590,19 +620,19 @@ export async function GET() {
   return NextResponse.json({
     endpoint: "/api/backfill",
     method: "POST",
-    description: "One-time historical data backfill using GeckoTerminal OHLCV (primary) or Helius (fallback)",
+    description: "Backfill ALL bonk.fun/USD1 pools from multiple sources (DexScreener + GeckoTerminal + Raydium)",
     requirements: {
       supabase: isSupabaseConfigured(),
       helius: isHeliusConfigured() ? "configured (fallback)" : "not configured (optional)"
     },
     params: {
-      poolLimit: "Max pools to process (default: 50)",
-      daysBack: "How far back to fetch. Use 0 to fetch ALL available history (default: 30)"
+      poolLimit: "Max pools to process. 0 = ALL pools (default: 0)",
+      daysBack: "How far back to fetch. 0 = ALL history (default: 0)"
     },
     authorization: "Bearer YOUR_CRON_SECRET",
     examples: {
-      fetchAll: "POST /api/backfill?daysBack=0 - Fetch all available historical data",
-      fetch30Days: "POST /api/backfill?daysBack=30 - Fetch last 30 days"
+      fetchAll: "POST /api/backfill - Fetch ALL pools with ALL history (default)",
+      limited: "POST /api/backfill?poolLimit=10&daysBack=7 - Fetch 10 pools, last 7 days"
     }
   })
 }
