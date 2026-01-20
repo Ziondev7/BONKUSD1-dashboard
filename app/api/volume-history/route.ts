@@ -9,34 +9,14 @@ const BONKFUN_POOL_TYPES = ["cpmm", "standard"]
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
 
-// Cache for volume history
-interface VolumeDataPoint {
-  timestamp: number
-  volume: number
-  trades: number
-}
-
-interface RaydiumPool {
-  id: string
-  mintA: { address: string; symbol?: string }
-  mintB: { address: string; symbol?: string }
-  tvl: number
-  day?: { volume?: number }
-  week?: { volume?: number }
-  month?: { volume?: number }
-}
-
+// Cache
 interface CacheEntry {
-  data: VolumeDataPoint[]
+  data: any
   timestamp: number
-  period: string
-  totalVolume24h: number
-  totalVolume7d: number
-  totalVolume30d: number
 }
 
-let volumeCache: Map<string, CacheEntry> = new Map()
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache
+let volumeCache: CacheEntry | null = null
+const CACHE_TTL = 2 * 60 * 1000 // 2 minutes cache
 
 // Fetch with timeout utility
 async function fetchWithTimeout(url: string, timeout = 10000): Promise<Response> {
@@ -63,17 +43,35 @@ function shouldExclude(symbol?: string): boolean {
   return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
 }
 
-// Fetch BONK.fun LaunchLab USD1 pools from Raydium (CPMM pools only)
-async function fetchRaydiumUSD1Pools(): Promise<{
-  pools: RaydiumPool[]
+// Fetch BONK.fun/USD1 pools from Raydium and get per-pool volume data
+async function fetchRaydiumVolumeData(): Promise<{
+  pools: Array<{
+    id: string
+    symbol: string
+    volume24h: number
+    volume7d: number
+    volume30d: number
+    tvl: number
+  }>
   totalVolume24h: number
   totalVolume7d: number
   totalVolume30d: number
+  totalTvl: number
+  poolCount: number
 }> {
-  const pools: RaydiumPool[] = []
+  const pools: Array<{
+    id: string
+    symbol: string
+    volume24h: number
+    volume7d: number
+    volume30d: number
+    tvl: number
+  }> = []
+
   let totalVolume24h = 0
   let totalVolume7d = 0
   let totalVolume30d = 0
+  let totalTvl = 0
 
   try {
     const pageSize = 500
@@ -82,8 +80,8 @@ async function fetchRaydiumUSD1Pools(): Promise<{
     const processPool = (pool: any) => {
       const mintA = pool.mintA?.address
       const mintB = pool.mintB?.address
-      const symbolA = pool.mintA?.symbol
-      const symbolB = pool.mintB?.symbol
+      const symbolA = pool.mintA?.symbol || "?"
+      const symbolB = pool.mintB?.symbol || "?"
 
       // Check if USD1 is one of the tokens
       const isAUSD1 = mintA === USD1_MINT
@@ -94,86 +92,100 @@ async function fetchRaydiumUSD1Pools(): Promise<{
       // Get the paired token (the BONK.fun launched token)
       const pairedSymbol = isAUSD1 ? symbolB : symbolA
 
-      // Exclude non-BONK.fun tokens (stablecoins, major tokens)
+      // Exclude non-BONK.fun tokens
       if (shouldExclude(pairedSymbol)) return
 
       const volume24h = pool.day?.volume || 0
       const volume7d = pool.week?.volume || 0
       const volume30d = pool.month?.volume || 0
+      const tvl = pool.tvl || 0
 
       totalVolume24h += volume24h
       totalVolume7d += volume7d
       totalVolume30d += volume30d
+      totalTvl += tvl
 
       pools.push({
         id: pool.id,
-        mintA: pool.mintA,
-        mintB: pool.mintB,
-        tvl: pool.tvl || 0,
-        day: pool.day,
-        week: pool.week,
-        month: pool.month,
+        symbol: pairedSymbol,
+        volume24h,
+        volume7d,
+        volume30d,
+        tvl,
       })
     }
 
-    // Fetch ONLY CPMM pools - these are BONK.fun LaunchLab graduated tokens
+    // Fetch pool types in parallel
     const fetchPoolType = async (poolType: string) => {
-      const firstPageUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=${poolType}&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
-      const firstResponse = await fetchWithTimeout(firstPageUrl)
+      const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=${poolType}&poolSortField=volume&sortType=desc&pageSize=${pageSize}&page=1`
 
-      if (!firstResponse.ok) {
-        console.error("[Volume] Raydium API error:", firstResponse.status)
-        return
-      }
-
-      const firstJson = await firstResponse.json()
-      if (!firstJson.success || !firstJson.data?.data) return
-
-      // Process first page
-      firstJson.data.data.forEach(processPool)
-
-      const totalCount = firstJson.data.count || firstJson.data.data.length
-      const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
-
-      // Fetch remaining pages in parallel
-      if (totalPages > 1 && firstJson.data.data.length >= pageSize) {
-        const pagePromises = []
-        for (let page = 2; page <= totalPages; page++) {
-          const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=${poolType}&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
-          pagePromises.push(
-            fetchWithTimeout(url, 8000)
-              .then(res => res.ok ? res.json() : null)
-              .catch(() => null)
-          )
+      try {
+        const response = await fetchWithTimeout(url)
+        if (!response.ok) {
+          console.error(`[Volume] Raydium API error for ${poolType}:`, response.status)
+          return
         }
 
-        const results = await Promise.all(pagePromises)
-        results.forEach(json => {
-          if (json?.success && json.data?.data) {
-            json.data.data.forEach(processPool)
+        const json = await response.json()
+        if (!json.success || !json.data?.data) return
+
+        json.data.data.forEach(processPool)
+
+        // Fetch additional pages if needed
+        const totalCount = json.data.count || json.data.data.length
+        const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
+
+        if (totalPages > 1) {
+          const pagePromises = []
+          for (let page = 2; page <= totalPages; page++) {
+            const pageUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=${poolType}&poolSortField=volume&sortType=desc&pageSize=${pageSize}&page=${page}`
+            pagePromises.push(
+              fetchWithTimeout(pageUrl, 8000)
+                .then(res => res.ok ? res.json() : null)
+                .catch(() => null)
+            )
           }
-        })
+
+          const results = await Promise.all(pagePromises)
+          results.forEach(result => {
+            if (result?.success && result.data?.data) {
+              result.data.data.forEach(processPool)
+            }
+          })
+        }
+      } catch (error) {
+        console.error(`[Volume] Error fetching ${poolType} pools:`, error)
       }
     }
 
-    // Fetch all BONK.fun pool types (CPMM for LaunchLab graduated tokens)
-    await Promise.all(BONKFUN_POOL_TYPES.map(poolType => fetchPoolType(poolType)))
+    await Promise.all(BONKFUN_POOL_TYPES.map(fetchPoolType))
 
-    console.log(`[Volume] Found ${pools.length} BONK.fun/USD1 LaunchLab pools (CPMM) - 24h: $${totalVolume24h.toLocaleString()}, 7d: $${totalVolume7d.toLocaleString()}, 30d: $${totalVolume30d.toLocaleString()}`)
+    // Sort by 24h volume descending
+    pools.sort((a, b) => b.volume24h - a.volume24h)
+
+    console.log(`[Volume] Raydium data: ${pools.length} BONK.fun/USD1 pools, 24h: $${totalVolume24h.toLocaleString()}, TVL: $${totalTvl.toLocaleString()}`)
   } catch (error) {
-    console.error("[Volume] Error fetching Raydium pools:", error)
+    console.error("[Volume] Error fetching Raydium data:", error)
   }
 
-  return { pools, totalVolume24h, totalVolume7d, totalVolume30d }
+  return {
+    pools,
+    totalVolume24h,
+    totalVolume7d,
+    totalVolume30d,
+    totalTvl,
+    poolCount: pools.length,
+  }
 }
 
-// Generate volume data points based on Raydium aggregated volume
-function generateVolumeDataPoints(
+// Generate simple volume history from current data
+// Note: Raydium doesn't provide historical OHLCV, so we show aggregate data
+function generateVolumeHistory(
   totalVolume: number,
   period: string
-): VolumeDataPoint[] {
+): Array<{ timestamp: number; volume: number }> {
   const now = Date.now()
-  const data: VolumeDataPoint[] = []
+  const history: Array<{ timestamp: number; volume: number }> = []
 
   let points: number
   let intervalMs: number
@@ -181,102 +193,37 @@ function generateVolumeDataPoints(
   switch (period) {
     case "24h":
       points = 24
-      intervalMs = 60 * 60 * 1000 // hourly
+      intervalMs = 60 * 60 * 1000
       break
     case "7d":
-      points = 7 * 6 // 4-hour intervals for 7 days
-      intervalMs = 4 * 60 * 60 * 1000
+      points = 7
+      intervalMs = 24 * 60 * 60 * 1000
       break
     case "1m":
       points = 30
-      intervalMs = 24 * 60 * 60 * 1000 // daily
+      intervalMs = 24 * 60 * 60 * 1000
       break
     case "all":
       points = 12
-      intervalMs = 7 * 24 * 60 * 60 * 1000 // weekly
+      intervalMs = 7 * 24 * 60 * 60 * 1000
       break
     default:
       points = 24
       intervalMs = 60 * 60 * 1000
   }
 
-  // Calculate base volume per interval
-  const baseVolumePerInterval = totalVolume / points
+  // Distribute volume evenly (this is an approximation since Raydium only provides aggregates)
+  const volumePerInterval = totalVolume / points
 
-  // Generate data points with natural variance
-  // Use deterministic variance based on timestamp to avoid flickering
   for (let i = points - 1; i >= 0; i--) {
     const timestamp = now - (i * intervalMs)
-
-    // Create natural-looking variance using sine waves
-    const hourOfDay = new Date(timestamp).getHours()
-    const dayOfWeek = new Date(timestamp).getDay()
-
-    // Trading activity tends to be higher during US/EU market hours
-    const timeMultiplier = 0.7 + 0.6 * Math.sin((hourOfDay - 6) * Math.PI / 12)
-
-    // Slightly more activity on weekdays
-    const dayMultiplier = dayOfWeek === 0 || dayOfWeek === 6 ? 0.85 : 1.05
-
-    // Add some randomness but keep it bounded
-    const randomSeed = (timestamp / 1000) % 1000
-    const randomVariance = 0.85 + (Math.sin(randomSeed) + 1) * 0.15
-
-    const volume = Math.round(baseVolumePerInterval * timeMultiplier * dayMultiplier * randomVariance)
-
-    data.push({
+    history.push({
       timestamp,
-      volume: Math.max(0, volume),
-      trades: 0,
+      volume: Math.round(volumePerInterval),
     })
   }
 
-  return data
-}
-
-// Main function to fetch volume history from Raydium only
-async function fetchBonkFunVolumeHistory(period: string): Promise<{
-  data: VolumeDataPoint[]
-  totalVolume24h: number
-  totalVolume7d: number
-  totalVolume30d: number
-}> {
-  console.log(`[Volume] Fetching BONK.fun/USD1 volume data for period: ${period} (Raydium only)`)
-
-  // Get all BONK.fun/USD1 pools from Raydium
-  const { pools, totalVolume24h, totalVolume7d, totalVolume30d } = await fetchRaydiumUSD1Pools()
-
-  if (pools.length === 0) {
-    console.log("[Volume] No BONK.fun/USD1 pools found on Raydium")
-    return { data: [], totalVolume24h: 0, totalVolume7d: 0, totalVolume30d: 0 }
-  }
-
-  // Select the appropriate volume based on period
-  let volumeForPeriod: number
-  switch (period) {
-    case "24h":
-      volumeForPeriod = totalVolume24h
-      break
-    case "7d":
-      volumeForPeriod = totalVolume7d > 0 ? totalVolume7d : totalVolume24h * 7
-      break
-    case "1m":
-      volumeForPeriod = totalVolume30d > 0 ? totalVolume30d : totalVolume24h * 30
-      break
-    case "all":
-      // Estimate based on available data
-      volumeForPeriod = totalVolume30d > 0 ? totalVolume30d * 3 : totalVolume24h * 90
-      break
-    default:
-      volumeForPeriod = totalVolume24h
-  }
-
-  // Generate volume data points from Raydium aggregated data
-  const volumeData = generateVolumeDataPoints(volumeForPeriod, period)
-
-  console.log(`[Volume] Generated ${volumeData.length} data points for ${period} from Raydium volume: $${volumeForPeriod.toLocaleString()}`)
-
-  return { data: volumeData, totalVolume24h, totalVolume7d, totalVolume30d }
+  return history
 }
 
 export async function GET(request: Request) {
@@ -284,73 +231,75 @@ export async function GET(request: Request) {
   const period = url.searchParams.get("period") || "24h"
 
   // Check cache
-  const cached = volumeCache.get(period)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (volumeCache && Date.now() - volumeCache.timestamp < CACHE_TTL) {
+    const cached = volumeCache.data
+    const volumeForPeriod = period === "24h" ? cached.totalVolume24h
+      : period === "7d" ? cached.totalVolume7d
+      : period === "1m" ? cached.totalVolume30d
+      : cached.totalVolume30d
+
+    const history = generateVolumeHistory(volumeForPeriod, period)
+
     return NextResponse.json({
-      history: cached.data,
-      stats: calculateStats(cached.data, cached.totalVolume24h),
+      history,
+      stats: {
+        current: volumeForPeriod,
+        previous: volumeForPeriod,
+        change: 0,
+        peak: Math.round(volumeForPeriod / (period === "24h" ? 24 : period === "7d" ? 7 : 30)),
+        low: Math.round(volumeForPeriod / (period === "24h" ? 24 : period === "7d" ? 7 : 30)),
+        average: Math.round(volumeForPeriod / (period === "24h" ? 24 : period === "7d" ? 7 : 30)),
+        totalVolume: volumeForPeriod,
+      },
       period,
-      dataPoints: cached.data.length,
+      dataPoints: history.length,
       cached: true,
       source: "raydium",
+      poolCount: cached.poolCount,
+      topPools: cached.pools.slice(0, 5).map((p: any) => ({
+        symbol: p.symbol,
+        volume24h: p.volume24h,
+      })),
     })
   }
 
-  // Fetch fresh data from Raydium only (BONK.fun/USD1 pools)
-  const { data: volumeData, totalVolume24h, totalVolume7d, totalVolume30d } = await fetchBonkFunVolumeHistory(period)
+  // Fetch fresh data
+  const data = await fetchRaydiumVolumeData()
 
-  // Update cache
-  volumeCache.set(period, {
-    data: volumeData,
+  // Cache the result
+  volumeCache = {
+    data,
     timestamp: Date.now(),
-    period,
-    totalVolume24h,
-    totalVolume7d,
-    totalVolume30d,
-  })
+  }
+
+  const volumeForPeriod = period === "24h" ? data.totalVolume24h
+    : period === "7d" ? data.totalVolume7d
+    : period === "1m" ? data.totalVolume30d
+    : data.totalVolume30d
+
+  const history = generateVolumeHistory(volumeForPeriod, period)
 
   return NextResponse.json({
-    history: volumeData,
-    stats: calculateStats(volumeData, totalVolume24h),
+    history,
+    stats: {
+      current: volumeForPeriod,
+      previous: volumeForPeriod,
+      change: 0,
+      peak: Math.round(volumeForPeriod / (period === "24h" ? 24 : period === "7d" ? 7 : 30)),
+      low: Math.round(volumeForPeriod / (period === "24h" ? 24 : period === "7d" ? 7 : 30)),
+      average: Math.round(volumeForPeriod / (period === "24h" ? 24 : period === "7d" ? 7 : 30)),
+      totalVolume: volumeForPeriod,
+    },
     period,
-    dataPoints: volumeData.length,
+    dataPoints: history.length,
     cached: false,
     source: "raydium",
+    poolCount: data.poolCount,
+    topPools: data.pools.slice(0, 5).map(p => ({
+      symbol: p.symbol,
+      volume24h: p.volume24h,
+    })),
   })
 }
 
-function calculateStats(data: VolumeDataPoint[], totalVolume24h: number = 0): {
-  current: number
-  previous: number
-  change: number
-  peak: number
-  low: number
-  average: number
-  totalVolume: number
-} {
-  if (data.length === 0) {
-    return { current: 0, previous: 0, change: 0, peak: 0, low: 0, average: 0, totalVolume: totalVolume24h }
-  }
-
-  const volumes = data.map(d => d.volume)
-  const current = volumes[volumes.length - 1] || 0
-  const previous = volumes[0] || current
-  const change = previous > 0 ? ((current - previous) / previous) * 100 : 0
-  const sumVolume = volumes.reduce((sum, v) => sum + v, 0)
-
-  // Use the Raydium total as the authoritative source
-  const totalVolume = totalVolume24h > 0 ? totalVolume24h : sumVolume
-
-  return {
-    current,
-    previous,
-    change,
-    peak: Math.max(...volumes),
-    low: Math.min(...volumes),
-    average: sumVolume / volumes.length,
-    totalVolume,
-  }
-}
-
-// Enable edge runtime for better performance
 export const runtime = "edge"
