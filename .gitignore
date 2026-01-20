@@ -24,5 +24,6 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.tsbonkusd1-dashboard-v0.zip
 next-env.d.ts
+bonkusd1-dashboard-v0.zip
+*.zip
