@@ -12,7 +12,19 @@ const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 const USE_DATABASE = true
 
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
-const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
+const EXCLUDED_SYMBOLS = ["USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "mSOL", "stSOL", "jitoSOL", "BONK", "JUP", "PYUSD", "DAI", "BUSD"]
+
+// Tokens to exclude by mint address
+const EXCLUDED_MINTS = new Set([
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "So11111111111111111111111111111111111111112",   // SOL (wrapped)
+  "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  // mSOL
+  "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", // stSOL
+  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // BONK
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",  // JUP
+  USD1_MINT, // USD1 itself
+])
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
@@ -91,10 +103,15 @@ async function fetchWithTimeout(url: string, timeout = 10000): Promise<Response>
   }
 }
 
-function shouldExclude(symbol?: string): boolean {
+function shouldExcludeSymbol(symbol?: string): boolean {
   if (!symbol) return false
   const s = symbol.toUpperCase()
   return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
+}
+
+function shouldExcludeMint(mint?: string): boolean {
+  if (!mint) return false
+  return EXCLUDED_MINTS.has(mint)
 }
 
 // ============================================
@@ -148,8 +165,8 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
       const pairedSymbol = isAUSD1 ? symbolB : symbolA
       const pairedMint = isAUSD1 ? mintB : mintA
 
-      // Exclude non-BONK.fun tokens
-      if (shouldExclude(pairedSymbol)) return
+      // Exclude non-BONK.fun tokens (by symbol AND mint address)
+      if (shouldExcludeSymbol(pairedSymbol) || shouldExcludeMint(pairedMint)) return
 
       const volume24h = pool.day?.volume || 0
       const liquidity = pool.tvl || 0
