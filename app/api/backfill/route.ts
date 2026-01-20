@@ -81,51 +81,68 @@ async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
 }
 
 /**
- * Fetch USD1 pools from GeckoTerminal as fallback
+ * Fetch USD1 pools from GeckoTerminal as fallback (with pagination)
  */
 async function fetchPoolsFromGeckoTerminal(limit: number): Promise<Pool[]> {
   console.log("[Backfill] Trying GeckoTerminal fallback...")
 
-  const url = `${GECKOTERMINAL_API}/networks/solana/tokens/${USD1_MINT}/pools?page=1`
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-  })
-
-  if (!response.ok) {
-    throw new Error(`GeckoTerminal API error: ${response.status}`)
-  }
-
-  const data = await response.json()
-  const geckoPools: GeckoPool[] = data.data || []
-
-  // Convert GeckoTerminal format to our Pool format
   const pools: Pool[] = []
+  const maxPages = Math.ceil(limit / 20) // GeckoTerminal returns 20 per page
 
-  for (const gp of geckoPools.slice(0, limit)) {
-    const poolAddress = gp.attributes.address
-    const poolName = gp.attributes.name || ""
-
-    // Parse pool name to extract token symbols (e.g., "TOKEN / USD1")
-    const nameParts = poolName.split(" / ")
-    const baseSymbol = nameParts[0]?.trim() || "UNKNOWN"
-    const quoteSymbol = nameParts[1]?.trim() || "USD1"
-
-    // Determine which side is USD1
-    const isBaseUsd1 = quoteSymbol.toUpperCase() !== "USD1"
-
-    pools.push({
-      id: poolAddress,
-      mintA: {
-        address: isBaseUsd1 ? USD1_MINT : "",
-        symbol: isBaseUsd1 ? "USD1" : baseSymbol,
-        name: isBaseUsd1 ? "USD1" : baseSymbol
-      },
-      mintB: {
-        address: isBaseUsd1 ? "" : USD1_MINT,
-        symbol: isBaseUsd1 ? baseSymbol : "USD1",
-        name: isBaseUsd1 ? baseSymbol : "USD1"
-      }
+  for (let page = 1; page <= maxPages && pools.length < limit; page++) {
+    const url = `${GECKOTERMINAL_API}/networks/solana/tokens/${USD1_MINT}/pools?page=${page}`
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
     })
+
+    if (!response.ok) {
+      if (page === 1) {
+        throw new Error(`GeckoTerminal API error: ${response.status}`)
+      }
+      break // Stop pagination on error after first page
+    }
+
+    const data = await response.json()
+    const geckoPools: GeckoPool[] = data.data || []
+
+    if (geckoPools.length === 0) break // No more pages
+
+    // Convert GeckoTerminal format to our Pool format
+    for (const gp of geckoPools) {
+      if (pools.length >= limit) break
+
+      const poolAddress = gp.attributes.address
+      const poolName = gp.attributes.name || ""
+
+      // Parse pool name to extract token symbols (e.g., "TOKEN / USD1")
+      const nameParts = poolName.split(" / ")
+      const baseSymbol = nameParts[0]?.trim() || "UNKNOWN"
+      const quoteSymbol = nameParts[1]?.trim() || "USD1"
+
+      // Determine which side is USD1
+      const isBaseUsd1 = quoteSymbol.toUpperCase() !== "USD1"
+
+      pools.push({
+        id: poolAddress,
+        mintA: {
+          address: isBaseUsd1 ? USD1_MINT : "",
+          symbol: isBaseUsd1 ? "USD1" : baseSymbol,
+          name: isBaseUsd1 ? "USD1" : baseSymbol
+        },
+        mintB: {
+          address: isBaseUsd1 ? "" : USD1_MINT,
+          symbol: isBaseUsd1 ? baseSymbol : "USD1",
+          name: isBaseUsd1 ? baseSymbol : "USD1"
+        }
+      })
+    }
+
+    console.log(`[Backfill] GeckoTerminal page ${page}: got ${geckoPools.length} pools (total: ${pools.length})`)
+
+    // Rate limit between pages
+    if (page < maxPages) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
   }
 
   return pools
