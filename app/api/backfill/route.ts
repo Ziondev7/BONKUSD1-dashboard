@@ -19,11 +19,27 @@ import { isSupabaseConfigured, getSupabase, upsertVolumeSnapshots, registerPool,
 // Constants - USD1 stablecoin (BONK.fun pairs)
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
+const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 
 interface Pool {
   id: string
   mintA: { address: string; symbol: string; name: string }
   mintB: { address: string; symbol: string; name: string }
+}
+
+interface GeckoPool {
+  id: string
+  attributes: {
+    address: string
+    name: string
+    base_token_price_usd: string
+    quote_token_price_usd: string
+    volume_usd: { h24: string }
+  }
+  relationships: {
+    base_token: { data: { id: string } }
+    quote_token: { data: { id: string } }
+  }
 }
 
 /**
@@ -64,6 +80,85 @@ async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
   throw lastError || new Error("Fetch failed after retries")
 }
 
+/**
+ * Fetch USD1 pools from GeckoTerminal as fallback
+ */
+async function fetchPoolsFromGeckoTerminal(limit: number): Promise<Pool[]> {
+  console.log("[Backfill] Trying GeckoTerminal fallback...")
+
+  const url = `${GECKOTERMINAL_API}/networks/solana/tokens/${USD1_MINT}/pools?page=1`
+  const response = await fetch(url, {
+    headers: { Accept: "application/json" },
+  })
+
+  if (!response.ok) {
+    throw new Error(`GeckoTerminal API error: ${response.status}`)
+  }
+
+  const data = await response.json()
+  const geckoPools: GeckoPool[] = data.data || []
+
+  // Convert GeckoTerminal format to our Pool format
+  const pools: Pool[] = []
+
+  for (const gp of geckoPools.slice(0, limit)) {
+    const poolAddress = gp.attributes.address
+    const poolName = gp.attributes.name || ""
+
+    // Parse pool name to extract token symbols (e.g., "TOKEN / USD1")
+    const nameParts = poolName.split(" / ")
+    const baseSymbol = nameParts[0]?.trim() || "UNKNOWN"
+    const quoteSymbol = nameParts[1]?.trim() || "USD1"
+
+    // Determine which side is USD1
+    const isBaseUsd1 = quoteSymbol.toUpperCase() !== "USD1"
+
+    pools.push({
+      id: poolAddress,
+      mintA: {
+        address: isBaseUsd1 ? USD1_MINT : "",
+        symbol: isBaseUsd1 ? "USD1" : baseSymbol,
+        name: isBaseUsd1 ? "USD1" : baseSymbol
+      },
+      mintB: {
+        address: isBaseUsd1 ? "" : USD1_MINT,
+        symbol: isBaseUsd1 ? baseSymbol : "USD1",
+        name: isBaseUsd1 ? baseSymbol : "USD1"
+      }
+    })
+  }
+
+  return pools
+}
+
+/**
+ * Try to fetch pools from Raydium, fall back to GeckoTerminal
+ */
+async function fetchPools(limit: number): Promise<Pool[]> {
+  // Try Raydium first
+  try {
+    const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=${limit}`
+    const poolsResponse = await fetchWithRetry(poolsUrl)
+    const poolsData = await poolsResponse.json()
+
+    if (poolsData.success && poolsData.data?.data?.length > 0) {
+      console.log(`[Backfill] Got ${poolsData.data.data.length} pools from Raydium`)
+      return poolsData.data.data
+    }
+  } catch (error) {
+    console.log(`[Backfill] Raydium failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
+
+  // Fallback to GeckoTerminal
+  try {
+    const pools = await fetchPoolsFromGeckoTerminal(limit)
+    console.log(`[Backfill] Got ${pools.length} pools from GeckoTerminal`)
+    return pools
+  } catch (error) {
+    throw new Error(`Both Raydium and GeckoTerminal failed. Last error: ${error instanceof Error ? error.message : 'Unknown'}`)
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Verify authorization
   const authHeader = request.headers.get("authorization")
@@ -98,19 +193,13 @@ export async function POST(request: NextRequest) {
   console.log(`[Backfill] Starting backfill for ${poolLimit} pools, ${daysBack} days back`)
 
   try {
-    // Step 1: Get all BONK.fun/USD1 pools from Raydium
-    // We use poolType=all to capture all pool types (CPMM, AMM, etc.)
-    console.log("[Backfill] Fetching pools from Raydium...")
-    const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=${poolLimit}`
+    // Step 1: Get all BONK.fun/USD1 pools (tries Raydium first, then GeckoTerminal)
+    console.log("[Backfill] Fetching USD1 pools...")
+    const pools = await fetchPools(poolLimit)
 
-    const poolsResponse = await fetchWithRetry(poolsUrl)
-    const poolsData = await poolsResponse.json()
-
-    if (!poolsData.success || !poolsData.data?.data) {
-      throw new Error("Invalid response from Raydium API")
+    if (pools.length === 0) {
+      throw new Error("No USD1 pools found")
     }
-
-    const pools: Pool[] = poolsData.data.data
 
     console.log(`[Backfill] Found ${pools.length} pools to process`)
 
