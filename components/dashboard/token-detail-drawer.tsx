@@ -21,95 +21,10 @@ import {
   Activity,
   Users,
   ArrowRightLeft,
-  Shield,
-  ShieldCheck,
-  ShieldAlert,
-  AlertTriangle,
 } from "lucide-react"
 import Image from "next/image"
 import type { Token } from "@/lib/types"
 import { formatNumber, formatPrice, formatAge, generateDeterministicChartData, cn } from "@/lib/utils"
-
-// Safety Score Card Component
-function SafetyScoreCard({ token }: { token: Token }) {
-  const safetyConfig = {
-    safe: {
-      icon: ShieldCheck,
-      bg: "bg-success/5",
-      border: "border-success/30",
-      text: "text-success",
-      label: "SAFE",
-      description: "This token shows healthy metrics",
-    },
-    caution: {
-      icon: Shield,
-      bg: "bg-bonk/5",
-      border: "border-bonk/30",
-      text: "text-bonk",
-      label: "CAUTION",
-      description: "Review warnings before trading",
-    },
-    risky: {
-      icon: ShieldAlert,
-      bg: "bg-danger/5",
-      border: "border-danger/30",
-      text: "text-danger",
-      label: "HIGH RISK",
-      description: "Multiple risk factors detected",
-    },
-  }
-
-  const level = token.safetyLevel || 'caution'
-  const score = token.safetyScore || 50
-  const warnings = token.safetyWarnings || []
-  const config = safetyConfig[level]
-  const Icon = config.icon
-
-  return (
-    <div className={cn("glass-card-solid p-4 border", config.border, config.bg)}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Icon className={cn("w-5 h-5", config.text)} />
-          <span className={cn("font-mono text-sm font-bold", config.text)}>{config.label}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-white/30 font-mono text-xs">Safety Score</span>
-          <span className={cn("font-mono font-bold text-lg", config.text)}>{score}</span>
-          <span className="text-white/30 font-mono text-xs">/100</span>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden mb-3">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${score}%` }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-          className={cn(
-            "h-full rounded-full",
-            level === 'safe' && "bg-gradient-to-r from-success/80 to-success",
-            level === 'caution' && "bg-gradient-to-r from-bonk/80 to-bonk",
-            level === 'risky' && "bg-gradient-to-r from-danger/80 to-danger"
-          )}
-        />
-      </div>
-
-      <p className="text-white/40 text-xs font-mono mb-2">{config.description}</p>
-
-      {/* Warnings */}
-      {warnings.length > 0 && (
-        <div className="space-y-1.5 pt-2 border-t border-white/[0.06]">
-          {warnings.map((warning, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs font-mono text-white/50">
-              <AlertTriangle className="w-3 h-3 text-bonk flex-shrink-0" />
-              {warning}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 interface TokenDetailDrawerProps {
   token: Token | null
@@ -236,9 +151,9 @@ export function TokenDetailDrawer({ token, isOpen, onClose }: TokenDetailDrawerP
     { label: "Liquidity", value: formatNumber(token.liquidity), icon: Droplets, color: "" },
     { label: "Market Cap", value: formatNumber(token.mcap), icon: BarChart3, color: "" },
     { label: "Volume 24h", value: formatNumber(token.volume24h), icon: Activity, color: "" },
+    { label: "Holders", value: token.holders ? token.holders.toLocaleString() : "—", icon: Users, color: "" },
     { label: "Age", value: formatAge(token.created), icon: Clock, color: "" },
     { label: "Txns 24h", value: token.txns24h.toLocaleString(), icon: ArrowRightLeft, color: "" },
-    { label: "Buys/Sells", value: `${token.buys24h}/${token.sells24h}`, icon: Users, color: "" },
   ]
 
   const hasSocials = token.twitter || token.website || token.telegram
@@ -368,9 +283,6 @@ export function TokenDetailDrawer({ token, isOpen, onClose }: TokenDetailDrawerP
 
               {/* Scrollable Content */}
               <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-5">
-                {/* Safety Score Card */}
-                <SafetyScoreCard token={token} />
-
                 {/* Mini Chart */}
                 <div className="glass-card-solid p-4">
                   <p className="text-white/30 font-mono text-[10px] uppercase tracking-[0.15em] mb-3">

@@ -19,13 +19,10 @@ export interface Token {
   txns24h: number
   buys24h: number
   sells24h: number
+  holders: number | null
   twitter: string | null
   telegram: string | null
   website: string | null
-  // Safety metrics
-  safetyScore: number
-  safetyLevel: 'safe' | 'caution' | 'risky'
-  safetyWarnings: string[]
   // Real-time tracking
   prevPrice?: number
   priceDirection?: 'up' | 'down' | 'neutral'

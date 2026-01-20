@@ -353,24 +353,3 @@ export function getUserFriendlyError(error: unknown): string {
   return defaultMessage
 }
 
-// ============================================
-// SAFETY SCORE HELPERS
-// ============================================
-
-const SAFETY_WARNING_EXPLANATIONS: Record<string, string> = {
-  "Low liquidity": "Low liquidity means large trades may have high slippage. Consider trading smaller amounts.",
-  "Low liq/mcap ratio": "Market cap is much higher than available liquidity. This increases price impact risk.",
-  "Low trading activity": "Few recent trades. May be difficult to exit your position quickly.",
-  "Unbalanced buy/sell": "Trading activity is heavily one-sided. This could indicate manipulation.",
-  "Very new token": "Token created within 6 hours. Higher risk of rug pull or abandonment.",
-  "Unknown age": "Cannot verify when this token was created. Exercise extra caution.",
-  "Suspicious liquidity ratio": "Liquidity is unusually high relative to market cap. Data may be inaccurate.",
-  "Abnormal transaction pattern": "Average transaction size is unusually small. Could indicate wash trading.",
-}
-
-/**
- * Get detailed explanation for a safety warning
- */
-export function getSafetyWarningExplanation(warning: string): string {
-  return SAFETY_WARNING_EXPLANATIONS[warning] || warning
-}

@@ -9,6 +9,11 @@ const CONFIG = {
   DEXSCREENER_API: "https://api.dexscreener.com",
   RAYDIUM_API: "https://api-v3.raydium.io",
   GECKOTERMINAL_API: "https://api.geckoterminal.com/api/v2",
+  // BONK.fun uses Raydium LaunchLab - graduated tokens go to CPMM pools
+  RAYDIUM_LAUNCHLAB_PROGRAM: "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+  RAYDIUM_CPMM_PROGRAM: "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+  // Pool types for BONK.fun graduated tokens (can be CPMM or Standard AMM V4)
+  BONKFUN_POOL_TYPES: ["cpmm", "standard"],
   EXCLUDED_SYMBOLS: ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"],
   MAX_MCAP_LIQUIDITY_RATIO: 100,
   MIN_LIQUIDITY_USD: 100,
@@ -104,30 +109,15 @@ async function fetchRaydiumPools(): Promise<Map<string, any>> {
   try {
     const pageSize = 500
     const maxPages = 5
-    
-    // OPTIMIZATION: Fetch first page to get total count, then parallelize remaining pages
-    const firstPageUrl = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
-    const firstResponse = await fetchWithTimeout(firstPageUrl)
-    
-    if (!firstResponse.ok) {
-      if (firstResponse.status === 429) markApiError("raydium")
-      return poolMap
-    }
 
-    const firstJson = await firstResponse.json()
-    if (!firstJson.success || !firstJson.data?.data) return poolMap
-
-    const firstPools = firstJson.data.data
-    const totalCount = firstJson.data.count || firstPools.length
-    const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
-
-    // Process first page
+    // Process pool data - only include BONK.fun LaunchLab tokens paired with USD1
     const processPool = (pool: any) => {
       const mintA = pool.mintA?.address
       const mintB = pool.mintB?.address
       const isAUSD1 = mintA === CONFIG.USD1_MINT
       const isBUSD1 = mintB === CONFIG.USD1_MINT
 
+      // Only process USD1 pairs
       if (!isAUSD1 && !isBUSD1) return
 
       const baseMint = isAUSD1 ? mintB : mintA
@@ -148,6 +138,7 @@ async function fetchRaydiumPools(): Promise<Map<string, any>> {
           decimals: baseToken?.decimals,
           poolId: pool.id,
           poolType: pool.type,
+          programId: pool.programId,
           tvl: poolLiquidity,
           volume24h: pool.day?.volume || 0,
           price: isAUSD1 ? pool.price : 1 / pool.price,
@@ -157,28 +148,52 @@ async function fetchRaydiumPools(): Promise<Map<string, any>> {
       }
     }
 
-    firstPools.forEach(processPool)
+    // Fetch ONLY CPMM pools - these are BONK.fun LaunchLab graduated tokens
+    // BONK.fun tokens migrate to CPMM pools on Raydium after graduating from bonding curve
+    const fetchPoolType = async (poolType: string) => {
+      const firstPageUrl = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=${poolType}&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
+      const firstResponse = await fetchWithTimeout(firstPageUrl)
 
-    // OPTIMIZATION: Fetch remaining pages in parallel
-    if (totalPages > 1 && firstPools.length >= pageSize) {
-      const pagePromises = []
-      for (let page = 2; page <= totalPages; page++) {
-        const url = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
-        pagePromises.push(
-          fetchWithTimeout(url, 6000)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null)
-        )
+      if (!firstResponse.ok) {
+        if (firstResponse.status === 429) markApiError("raydium")
+        return
       }
 
-      const results = await Promise.all(pagePromises)
-      results.forEach(json => {
-        if (json?.success && json.data?.data) {
-          json.data.data.forEach(processPool)
+      const firstJson = await firstResponse.json()
+      if (!firstJson.success || !firstJson.data?.data) return
+
+      const firstPools = firstJson.data.data
+      const totalCount = firstJson.data.count || firstPools.length
+      const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
+
+      // Process first page
+      firstPools.forEach(processPool)
+
+      // Fetch remaining pages in parallel
+      if (totalPages > 1 && firstPools.length >= pageSize) {
+        const pagePromises = []
+        for (let page = 2; page <= totalPages; page++) {
+          const url = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=${poolType}&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
+          pagePromises.push(
+            fetchWithTimeout(url, 6000)
+              .then(res => res.ok ? res.json() : null)
+              .catch(() => null)
+          )
         }
-      })
+
+        const results = await Promise.all(pagePromises)
+        results.forEach(json => {
+          if (json?.success && json.data?.data) {
+            json.data.data.forEach(processPool)
+          }
+        })
+      }
     }
 
+    // Fetch all BONK.fun pool types (primarily CPMM for LaunchLab graduated tokens)
+    await Promise.all(CONFIG.BONKFUN_POOL_TYPES.map(poolType => fetchPoolType(poolType)))
+
+    console.log(`[Raydium] Found ${poolMap.size} BONK.fun/USD1 tokens from LaunchLab (CPMM pools)`)
     resetApiHealth("raydium")
   } catch (error) {
     console.error("[Raydium] Error:", error)
@@ -393,88 +408,6 @@ function getTokenEmoji(name?: string): string {
   return "🪙"
 }
 
-// Calculate token safety score based on multiple factors
-function calculateSafetyScore(token: {
-  liquidity: number
-  mcap: number
-  volume24h: number
-  txns24h: number
-  buys24h: number
-  sells24h: number
-  created: number | null
-  hasSocials: boolean
-}): { score: number; level: 'safe' | 'caution' | 'risky'; warnings: string[] } {
-  let score = 0
-  const warnings: string[] = []
-
-  // Input validation - detect suspicious metrics
-  if (token.liquidity > token.mcap * 10 && token.mcap > 0) {
-    warnings.push("Suspicious liquidity ratio")
-    score -= 15
-  }
-  
-  if (token.txns24h > 0 && token.volume24h > 0) {
-    const avgTxnSize = token.volume24h / token.txns24h
-    if (avgTxnSize < 0.5) {
-      warnings.push("Abnormal transaction pattern")
-      score -= 10
-    }
-  }
-
-  // Liquidity checks (max 30 points)
-  if (token.liquidity >= 50000) score += 30
-  else if (token.liquidity >= 10000) score += 20
-  else if (token.liquidity >= 5000) score += 10
-  else warnings.push("Low liquidity")
-
-  // Liquidity to market cap ratio (max 20 points)
-  const liqRatio = token.mcap > 0 ? (token.liquidity / token.mcap) * 100 : 0
-  if (liqRatio >= 10) score += 20
-  else if (liqRatio >= 5) score += 15
-  else if (liqRatio >= 2) score += 10
-  else warnings.push("Low liq/mcap ratio")
-
-  // Trading activity (max 20 points)
-  if (token.txns24h >= 100) score += 20
-  else if (token.txns24h >= 50) score += 15
-  else if (token.txns24h >= 20) score += 10
-  else if (token.txns24h < 10) warnings.push("Low trading activity")
-
-  // Buy/Sell balance (max 15 points) - healthy markets have balanced trading
-  const totalTxns = token.buys24h + token.sells24h
-  if (totalTxns > 0) {
-    const buyRatio = token.buys24h / totalTxns
-    if (buyRatio >= 0.35 && buyRatio <= 0.65) score += 15
-    else if (buyRatio >= 0.25 && buyRatio <= 0.75) score += 10
-    else warnings.push("Unbalanced buy/sell")
-  }
-
-  // Age check (max 10 points)
-  if (token.created) {
-    const ageHours = (Date.now() - token.created) / (1000 * 60 * 60)
-    if (ageHours >= 72) score += 10
-    else if (ageHours >= 24) score += 7
-    else if (ageHours >= 6) score += 4
-    else warnings.push("Very new token")
-  } else {
-    warnings.push("Unknown age")
-  }
-
-  // Social presence (max 5 points)
-  if (token.hasSocials) score += 5
-
-  // Ensure score doesn't go below 0
-  score = Math.max(0, score)
-
-  // Determine level
-  let level: 'safe' | 'caution' | 'risky'
-  if (score >= 70) level = 'safe'
-  else if (score >= 40) level = 'caution'
-  else level = 'risky'
-
-  return { score: Math.min(score, 100), level, warnings }
-}
-
 function extractSocialLinks(dexData: any): { twitter?: string; telegram?: string; website?: string } {
   const socials: { twitter?: string; telegram?: string; website?: string } = {}
   if (dexData?.info?.socials) {
@@ -494,30 +427,40 @@ function extractSocialLinks(dexData: any): { twitter?: string; telegram?: string
 // ============================================
 
 async function fetchAllTokens(): Promise<any[]> {
-  console.log("[API] Starting parallel token fetch...")
+  console.log("[API] Starting BONK.fun token fetch (Raydium LaunchLab CPMM pools only)...")
   const startTime = Date.now()
 
-  // Fetch from all sources in parallel
-  const [raydiumPools, dexScreenerPairs, geckoTerminalPools] = await Promise.all([
-    fetchRaydiumPools(),
+  // PRIMARY: Fetch BONK.fun tokens from Raydium LaunchLab (CPMM pools)
+  // Only Raydium can identify BONK.fun LaunchLab tokens via pool type
+  const raydiumPools = await fetchRaydiumPools()
+
+  console.log(`[API] Found ${raydiumPools.size} BONK.fun/USD1 tokens from Raydium LaunchLab in ${Date.now() - startTime}ms`)
+
+  // If no BONK.fun tokens found, return early
+  if (raydiumPools.size === 0) {
+    console.log("[API] No BONK.fun tokens found")
+    return []
+  }
+
+  // SECONDARY: Enrich BONK.fun token data with DexScreener and GeckoTerminal
+  // Only fetch data for tokens we already identified as BONK.fun tokens
+  const bonkfunMints = Array.from(raydiumPools.keys())
+
+  const [dexScreenerPairs, geckoTerminalPools] = await Promise.all([
     fetchDexScreenerPairs(),
     fetchGeckoTerminalPools(),
   ])
 
   console.log(
-    `[API] Sources fetched in ${Date.now() - startTime}ms: Raydium=${raydiumPools.size}, DexScreener=${dexScreenerPairs.size}, GeckoTerminal=${geckoTerminalPools.size}`
+    `[API] Data enrichment: DexScreener=${dexScreenerPairs.size}, GeckoTerminal=${geckoTerminalPools.size}`
   )
 
-  // Merge all mints
-  const allMints = new Set([
-    ...raydiumPools.keys(),
-    ...dexScreenerPairs.keys(),
-    ...geckoTerminalPools.keys(),
-  ])
+  // Only use BONK.fun token mints from Raydium (not other sources)
+  const allMints = new Set(bonkfunMints)
 
-  // Get detailed data for mints not in DexScreener
-  const mintsNeedingData = Array.from(allMints).filter((mint) => !dexScreenerPairs.has(mint))
-  
+  // Get detailed data for BONK.fun mints not in DexScreener
+  const mintsNeedingData = bonkfunMints.filter((mint) => !dexScreenerPairs.has(mint))
+
   if (mintsNeedingData.length > 0 && isApiHealthy("dexscreener")) {
     const detailedData = await fetchDexScreenerBatchData(mintsNeedingData)
     for (const [mint, data] of detailedData) {
@@ -562,24 +505,14 @@ async function fetchAllTokens(): Promise<any[]> {
     if (price <= 0) continue
 
     const socials = extractSocialLinks(dexData)
-    const hasSocials = !!(socials.twitter || socials.telegram || socials.website)
-    
+
     const txns24h = (dexData?.txns?.h24?.buys || 0) + (dexData?.txns?.h24?.sells || 0) || geckoData?.txns24h || 0
     const buys24h = dexData?.txns?.h24?.buys || geckoData?.buys24h || 0
     const sells24h = dexData?.txns?.h24?.sells || geckoData?.sells24h || 0
     const created = dexData?.pairCreatedAt || geckoData?.createdAt || null
 
-    // Calculate safety score
-    const safety = calculateSafetyScore({
-      liquidity,
-      mcap: fdv,
-      volume24h,
-      txns24h,
-      buys24h,
-      sells24h,
-      created,
-      hasSocials,
-    })
+    // Get holders count from DexScreener if available
+    const holders = dexData?.info?.holders || null
 
     tokens.push({
       id: id++,
@@ -602,13 +535,10 @@ async function fetchAllTokens(): Promise<any[]> {
       txns24h,
       buys24h,
       sells24h,
+      holders,
       twitter: socials.twitter || null,
       telegram: socials.telegram || null,
       website: socials.website || null,
-      // Safety metrics
-      safetyScore: safety.score,
-      safetyLevel: safety.level,
-      safetyWarnings: safety.warnings,
     })
   }
 

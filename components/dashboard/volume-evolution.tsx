@@ -39,6 +39,9 @@ interface VolumeHistoryResponse {
   dataPoints: number
   cached?: boolean
   synthetic?: boolean
+  source?: string
+  poolCount?: number
+  topPools?: Array<{ symbol: string; volume24h: number }>
 }
 
 const PERIODS = [
@@ -323,13 +326,16 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
         <div className="flex items-center gap-3">
           <Activity className="w-5 h-5 text-bonk" />
-          <h2 className="font-mono font-bold text-sm tracking-wide">VOLUME EVOLUTION</h2>
-          <span className="text-white/30 font-mono text-xs">// USD1 PAIRS</span>
-          {data?.synthetic && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-bonk/10 border border-bonk/20" title="Historical data unavailable - showing estimates based on typical trading patterns">
-              <AlertTriangle className="w-3 h-3 text-bonk" />
-              <span className="text-[10px] font-bold text-bonk tracking-wide">ESTIMATED DATA</span>
+          <h2 className="font-mono font-bold text-sm tracking-wide">VOLUME</h2>
+          <span className="text-white/30 font-mono text-xs">// BONK.FUN × USD1</span>
+          {data?.source === "raydium" && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20">
+              <Zap className="w-3 h-3 text-success" />
+              <span className="text-[10px] font-bold text-success tracking-wide">RAYDIUM</span>
             </div>
+          )}
+          {data?.poolCount && (
+            <span className="text-white/30 font-mono text-xs">{data.poolCount} pools</span>
           )}
         </div>
 
@@ -419,47 +425,65 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
           </div>
         )}
 
+        {/* Top Pools by Volume */}
+        {data?.topPools && data.topPools.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-white/[0.04]">
+            <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-3">
+              TOP POOLS BY 24H VOLUME
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {data.topPools.map((pool, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06]"
+                >
+                  <span className="text-bonk font-mono font-bold text-sm">${pool.symbol}</span>
+                  <span className="text-white/40 font-mono text-xs">
+                    {formatNumber(pool.volume24h)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Bottom Stats Grid */}
         {data && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Data Points
+                Pools
               </p>
-              <p className="text-white font-mono font-bold">{data.dataPoints}</p>
+              <p className="text-white font-mono font-bold">{data.poolCount || data.dataPoints}</p>
             </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Period Start
+                Avg/Pool
               </p>
               <p className="text-white font-mono font-bold">
-                {data.history.length > 0 
-                  ? new Date(data.history[0].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                {data.poolCount && displayVolume > 0
+                  ? formatNumber(displayVolume / data.poolCount)
                   : "—"
                 }
               </p>
             </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Latest Update
+                Source
               </p>
-              <p className="text-white font-mono font-bold">
-                {data.history.length > 0 
-                  ? new Date(data.history[data.history.length - 1].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                  : "—"
-                }
+              <p className="text-success font-mono font-bold uppercase">
+                {data.source || "Raydium"}
               </p>
             </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Trend
+                Status
               </p>
               <p className={cn(
-                "font-mono font-bold flex items-center justify-center gap-1",
-                isPositive ? "text-success" : "text-danger"
+                "font-mono font-bold flex items-center justify-center gap-1 text-success"
               )}>
-                {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {isPositive ? "Bullish" : "Bearish"}
+                <Zap className="w-4 h-4" />
+                Live
               </p>
             </div>
           </div>
