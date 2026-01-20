@@ -26,6 +26,44 @@ interface Pool {
   mintB: { address: string; symbol: string; name: string }
 }
 
+/**
+ * Fetch with retry logic for flaky APIs
+ */
+async function fetchWithRetry(url: string, maxRetries = 3): Promise<Response> {
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[Backfill] Fetch attempt ${attempt}/${maxRetries}...`)
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+      })
+
+      if (response.ok) {
+        return response
+      }
+
+      // If 500 error, retry
+      if (response.status >= 500 && attempt < maxRetries) {
+        console.log(`[Backfill] Server error ${response.status}, retrying in ${attempt * 2}s...`)
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000))
+        continue
+      }
+
+      throw new Error(`API error: ${response.status}`)
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+
+      if (attempt < maxRetries) {
+        console.log(`[Backfill] Error: ${lastError.message}, retrying in ${attempt * 2}s...`)
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000))
+      }
+    }
+  }
+
+  throw lastError || new Error("Fetch failed after retries")
+}
+
 export async function POST(request: NextRequest) {
   // Verify authorization
   const authHeader = request.headers.get("authorization")
@@ -61,17 +99,18 @@ export async function POST(request: NextRequest) {
 
   try {
     // Step 1: Get all BONK.fun/USD1 pools from Raydium
+    // We use poolType=all to capture all pool types (CPMM, AMM, etc.)
     console.log("[Backfill] Fetching pools from Raydium...")
-    const poolsResponse = await fetch(
-      `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=cpmm&poolSortField=volume24h&sortType=desc&pageSize=${poolLimit}`
-    )
+    const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=${poolLimit}`
 
-    if (!poolsResponse.ok) {
-      throw new Error(`Raydium API error: ${poolsResponse.status}`)
+    const poolsResponse = await fetchWithRetry(poolsUrl)
+    const poolsData = await poolsResponse.json()
+
+    if (!poolsData.success || !poolsData.data?.data) {
+      throw new Error("Invalid response from Raydium API")
     }
 
-    const poolsData = await poolsResponse.json()
-    const pools: Pool[] = poolsData.data?.data || []
+    const pools: Pool[] = poolsData.data.data
 
     console.log(`[Backfill] Found ${pools.length} pools to process`)
 
