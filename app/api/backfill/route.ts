@@ -76,7 +76,10 @@ async function fetchHistoricalVolume(
   console.log(`[Backfill] Fetching OHLCV data for ${tokenSymbol}...`)
 
   const fetchAll = daysBack === 0 // 0 means fetch all available data
-  const allData: { timestamp: number; volume: number; trades: number }[] = []
+  const dataMap = new Map<number, { timestamp: number; volume: number; trades: number }>()
+
+  // Add delay to avoid rate limiting
+  await new Promise(resolve => setTimeout(resolve, 300))
 
   // STEP 1: Always fetch daily candles first for maximum historical coverage (up to 1000 days)
   console.log(`[Backfill] Fetching daily candles for full history...`)
@@ -98,15 +101,18 @@ async function fetchHistoricalVolume(
       console.log(`[Backfill] Daily data range: ${oldest.toISOString().split('T')[0]} to ${newest.toISOString().split('T')[0]}`)
     }
 
-    // Convert daily candles to our format
+    // Add daily candles to map (keyed by timestamp to prevent duplicates)
     for (const candle of dailyCandles) {
-      allData.push({
+      dataMap.set(candle.timestamp, {
         timestamp: candle.timestamp,
         volume: candle.volume,
         trades: Math.max(1, Math.floor(candle.volume / 1000))
       })
     }
   }
+
+  // Add delay to avoid rate limiting
+  await new Promise(resolve => setTimeout(resolve, 300))
 
   // STEP 2: Also fetch hourly candles for recent data (more granular, last ~41 days)
   console.log(`[Backfill] Fetching hourly candles for recent granularity...`)
@@ -121,34 +127,30 @@ async function fetchHistoricalVolume(
       hourlyCandles = hourlyCandles.filter(c => c.timestamp >= cutoffTime)
     }
 
-    // Merge hourly data - replace daily data with hourly where available
-    const hourlyTimestamps = new Set(hourlyCandles.map(c => {
-      // Round to day for comparison
+    // Remove daily data that overlaps with hourly data (hourly is more granular)
+    const hourlyDays = new Set(hourlyCandles.map(c => {
       return Math.floor(c.timestamp / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000
     }))
 
-    // Remove daily data that overlaps with hourly data
-    const filteredDaily = allData.filter(d => !hourlyTimestamps.has(
-      Math.floor(d.timestamp / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000
-    ))
+    // Delete overlapping daily entries
+    for (const dayTimestamp of hourlyDays) {
+      dataMap.delete(dayTimestamp)
+    }
 
-    // Add hourly candles
+    // Add hourly candles (keyed by timestamp to prevent duplicates)
     for (const candle of hourlyCandles) {
-      filteredDaily.push({
+      dataMap.set(candle.timestamp, {
         timestamp: candle.timestamp,
         volume: candle.volume,
         trades: Math.max(1, Math.floor(candle.volume / 1000))
       })
     }
-
-    // Sort by timestamp
-    filteredDaily.sort((a, b) => a.timestamp - b.timestamp)
-    return filteredDaily
   }
 
-  if (allData.length > 0) {
-    allData.sort((a, b) => a.timestamp - b.timestamp)
-    return allData
+  if (dataMap.size > 0) {
+    // Convert map to sorted array
+    const result = Array.from(dataMap.values()).sort((a, b) => a.timestamp - b.timestamp)
+    return result
   }
 
   // Final fallback: Helius transaction parsing
@@ -478,61 +480,18 @@ async function fetchPoolsFromBonkUsd1Api(): Promise<Pool[]> {
 }
 
 /**
- * Fetch ALL pools from multiple sources and combine them (no duplicates)
- * Priority: bonkusd1.fun API (most complete) > DexScreener > GeckoTerminal > Raydium
+ * Fetch ALL pools from bonkusd1.fun API (primary and only source needed)
+ * Skip DexScreener/GeckoTerminal since bonkusd1.fun already has all 600+ migrated tokens
  */
 async function fetchPools(limit: number): Promise<Pool[]> {
-  const allPools = new Map<string, Pool>() // Use Map to deduplicate by pool address
-
-  // Try bonkusd1.fun API first (most complete - has all 600+ tokens)
-  try {
-    const bonkPools = await fetchPoolsFromBonkUsd1Api()
-    for (const pool of bonkPools) {
-      allPools.set(pool.id, pool)
-    }
-    console.log(`[Backfill] bonkusd1.fun: ${bonkPools.length} pools`)
-  } catch (error) {
-    console.log(`[Backfill] bonkusd1.fun failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-  }
-
-  // Also try DexScreener (might have pools not in bonkusd1.fun)
-  try {
-    console.log("[Backfill] Fetching from DexScreener...")
-    const dexPools = await fetchPoolsFromDexScreener(9999)
-    let newFromDex = 0
-    for (const pool of dexPools) {
-      if (!allPools.has(pool.id)) {
-        allPools.set(pool.id, pool)
-        newFromDex++
-      }
-    }
-    console.log(`[Backfill] DexScreener: ${dexPools.length} pools (${newFromDex} new)`)
-  } catch (error) {
-    console.log(`[Backfill] DexScreener failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-  }
-
-  // Also try GeckoTerminal
-  try {
-    console.log("[Backfill] Fetching from GeckoTerminal...")
-    const geckoPools = await fetchPoolsFromGeckoTerminal(9999)
-    let newFromGecko = 0
-    for (const pool of geckoPools) {
-      if (!allPools.has(pool.id)) {
-        allPools.set(pool.id, pool)
-        newFromGecko++
-      }
-    }
-    console.log(`[Backfill] GeckoTerminal: ${geckoPools.length} pools (${newFromGecko} new)`)
-  } catch (error) {
-    console.log(`[Backfill] GeckoTerminal failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-  }
-
-  const pools = Array.from(allPools.values())
-  console.log(`[Backfill] Total unique pools found: ${pools.length}`)
+  // Use bonkusd1.fun API - it has all migrated USD1 pools
+  const pools = await fetchPoolsFromBonkUsd1Api()
 
   if (pools.length === 0) {
-    throw new Error("No USD1 pools found from any source")
+    throw new Error("No USD1 pools found from bonkusd1.fun API")
   }
+
+  console.log(`[Backfill] Total pools to process: ${pools.length}`)
 
   // Apply limit if specified (0 means no limit)
   return limit > 0 ? pools.slice(0, limit) : pools
@@ -654,8 +613,8 @@ export async function POST(request: NextRequest) {
         results.push({ pool: tokenSymbol, status: 'error', error: errorMessage })
       }
 
-      // Rate limit between pools
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // Rate limit between pools (1 second to avoid GeckoTerminal 429 errors)
+      await new Promise(resolve => setTimeout(resolve, 1000))
     }
 
     // Summary
