@@ -22,6 +22,24 @@ const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 const DEXSCREENER_API = "https://api.dexscreener.com/latest"
 
+// Tokens to EXCLUDE (stablecoins, major tokens - NOT bonk.fun meme tokens)
+const EXCLUDED_TOKENS = new Set([
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "So11111111111111111111111111111111111111112",   // SOL (wrapped)
+  "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  // mSOL
+  "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", // stSOL
+  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // BONK
+  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",  // JUP
+  USD1_MINT, // USD1 itself (avoid USD1/USD1 if any)
+])
+
+// Symbol-based exclusions (for APIs that don't return mint addresses)
+const EXCLUDED_SYMBOLS = new Set([
+  "USDC", "USDT", "SOL", "WSOL", "mSOL", "stSOL", "jitoSOL",
+  "BONK", "JUP", "RAY", "USD1", "PYUSD", "DAI", "BUSD"
+])
+
 interface Pool {
   id: string
   mintA: { address: string; symbol: string; name: string }
@@ -122,6 +140,13 @@ async function fetchPoolsFromGeckoTerminal(limit: number): Promise<Pool[]> {
 
       // Determine which side is USD1
       const isBaseUsd1 = quoteSymbol.toUpperCase() !== "USD1"
+      const otherSymbol = isBaseUsd1 ? baseSymbol : quoteSymbol
+
+      // Skip excluded tokens (stablecoins, major tokens)
+      if (EXCLUDED_SYMBOLS.has(otherSymbol.toUpperCase())) {
+        console.log(`[Backfill] Skipping ${otherSymbol} (excluded token)`)
+        continue
+      }
 
       pools.push({
         id: poolAddress,
@@ -176,8 +201,19 @@ async function fetchPoolsFromDexScreener(limit: number): Promise<Pool[]> {
 
   console.log(`[Backfill] Found ${raydiumPairs.length} Raydium pools`)
 
+  // Filter out stablecoins and major tokens - we only want bonk.fun meme tokens
+  const memeTokenPairs = raydiumPairs.filter((p: any) => {
+    const baseMint = p.baseToken?.address || ""
+    const quoteMint = p.quoteToken?.address || ""
+    // The "other" token (not USD1) should NOT be in our excluded list
+    const otherMint = baseMint === USD1_MINT ? quoteMint : baseMint
+    return !EXCLUDED_TOKENS.has(otherMint)
+  })
+
+  console.log(`[Backfill] Found ${memeTokenPairs.length} bonk.fun meme token pools (after filtering)`)
+
   const pools: Pool[] = []
-  for (const pair of raydiumPairs.slice(0, limit)) {
+  for (const pair of memeTokenPairs.slice(0, limit)) {
     const poolAddress = pair.pairAddress
     const baseSymbol = pair.baseToken?.symbol || "UNKNOWN"
     const quoteSymbol = pair.quoteToken?.symbol || "USD1"
