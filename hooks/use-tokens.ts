@@ -61,19 +61,24 @@ interface UseTokensReturn {
   tokens: Token[]
   isLoading: boolean
   isError: boolean
+  isRefreshing: boolean
   status: StatusState
   metrics: MetricsSnapshot
   lastRefresh: Date | null
   refresh: () => Promise<void>
   apiHealth: { raydium: boolean; dexscreener: boolean; geckoterminal: boolean } | null
+  // Optimistic update support
+  updateTokenPrice: (address: string, price: number, change24h?: number) => void
 }
 
 export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
   const { refreshInterval = 10000, enableSound = false } = options // 10s for faster updates
-  
+
   // Initial cache load
   const [cachedTokens] = useState<Token[] | null>(() => loadLocalCache())
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, { price: number; change24h?: number; timestamp: number }>>(new Map())
   const prevTokensRef = useRef<Map<string, Token>>(new Map())
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -99,34 +104,49 @@ export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
 
   const tokens = useMemo(() => {
     const rawTokens = data?.tokens || []
-    
+
     // Track price changes for animations
     const prevMap = prevTokensRef.current
+    const now = Date.now()
+
     const updatedTokens = rawTokens.map(token => {
       const prev = prevMap.get(token.address)
-      let priceDirection: 'up' | 'down' | 'neutral' = 'neutral'
-      
-      if (prev && prev.price !== token.price) {
-        priceDirection = token.price > prev.price ? 'up' : 'down'
+      const optimistic = optimisticUpdates.get(token.address)
+
+      // Apply optimistic update if it's recent (< 10s old)
+      let currentPrice = token.price
+      let currentChange = token.change24h
+      if (optimistic && now - optimistic.timestamp < 10000) {
+        currentPrice = optimistic.price
+        if (optimistic.change24h !== undefined) {
+          currentChange = optimistic.change24h
+        }
       }
-      
+
+      let priceDirection: 'up' | 'down' | 'neutral' = 'neutral'
+      if (prev && prev.price !== currentPrice) {
+        priceDirection = currentPrice > prev.price ? 'up' : 'down'
+      }
+
       return {
         ...token,
+        price: currentPrice,
+        change24h: currentChange,
         prevPrice: prev?.price,
         priceDirection,
-        lastUpdate: Date.now(),
+        lastUpdate: now,
       }
     })
-    
+
     // Update previous tokens map
     const newMap = new Map<string, Token>()
     for (const token of updatedTokens) {
       newMap.set(token.address, token)
     }
     prevTokensRef.current = newMap
-    
+
     return updatedTokens
-  }, [data?.tokens])
+  }, [data?.tokens, optimisticUpdates])
 
   // Play sound for hot tokens
   useEffect(() => {
@@ -199,18 +219,54 @@ export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
   }, [isLoading, error, data?.stale, tokens.length, lastRefresh])
 
   const refresh = useCallback(async () => {
-    await mutate()
+    setIsRefreshing(true)
+    try {
+      await mutate()
+    } finally {
+      setIsRefreshing(false)
+    }
   }, [mutate])
+
+  // Optimistic price update function (for WebSocket integration)
+  const updateTokenPrice = useCallback((address: string, price: number, change24h?: number) => {
+    setOptimisticUpdates(prev => {
+      const next = new Map(prev)
+      next.set(address, { price, change24h, timestamp: Date.now() })
+      return next
+    })
+  }, [])
+
+  // Clean up stale optimistic updates periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOptimisticUpdates(prev => {
+        const now = Date.now()
+        const next = new Map<string, { price: number; change24h?: number; timestamp: number }>()
+        prev.forEach((value, key) => {
+          // Keep updates less than 10 seconds old
+          if (now - value.timestamp < 10000) {
+            next.set(key, value)
+          }
+        })
+        // Only update state if something changed
+        return next.size === prev.size ? prev : next
+      })
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   return {
     tokens,
     isLoading: isLoading && tokens.length === 0,
     isError: !!error,
+    isRefreshing,
     status,
     metrics,
     lastRefresh,
     refresh,
     apiHealth: data?.health || null,
+    updateTokenPrice,
   }
 }
 
