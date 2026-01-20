@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { isSupabaseConfigured, getAggregatedVolume } from "@/lib/supabase"
 
 // ============================================
 // CONFIGURATION
@@ -6,6 +7,9 @@ import { NextResponse } from "next/server"
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
+
+// Feature flag: Use database when available
+const USE_DATABASE = true
 
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
@@ -610,8 +614,45 @@ function calculateStats(
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const period = url.searchParams.get("period") || "24h"
+  const forceRefresh = url.searchParams.get("refresh") === "true"
 
-  // Check cache
+  // ============================================
+  // STRATEGY 1: Use Database (Supabase) - Instant, No Rate Limits
+  // ============================================
+  if (USE_DATABASE && isSupabaseConfigured() && !forceRefresh) {
+    console.log(`[Volume] Checking Supabase for ${period} data...`)
+
+    const dbResult = await getAggregatedVolume(period as '24h' | '7d' | '1m' | 'all')
+
+    if (dbResult && dbResult.history.length > 0) {
+      console.log(`[Volume] Using Supabase data: ${dbResult.history.length} points, $${dbResult.total.toLocaleString()} total`)
+
+      const volumeData = dbResult.history.map(h => ({
+        timestamp: h.timestamp,
+        volume: h.volume,
+        trades: h.trades,
+        isOhlcv: true, // Data from DB is real on-chain data
+      }))
+
+      return NextResponse.json({
+        history: volumeData,
+        stats: calculateStats(volumeData, dbResult.total, dbResult.poolCount),
+        period,
+        dataPoints: volumeData.length,
+        cached: false,
+        synthetic: false,
+        poolCount: dbResult.poolCount,
+        ohlcvCoverage: 100, // Database has complete coverage
+        source: 'database',
+      })
+    }
+
+    console.log(`[Volume] Supabase empty, falling back to API...`)
+  }
+
+  // ============================================
+  // STRATEGY 2: Use In-Memory Cache
+  // ============================================
   const cached = volumeCache.get(period)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return NextResponse.json({
@@ -623,10 +664,13 @@ export async function GET(request: Request) {
       synthetic: cached.synthetic,
       poolCount: cached.poolCount,
       ohlcvCoverage: cached.ohlcvCoverage,
+      source: 'cache',
     })
   }
 
-  // Fetch fresh data
+  // ============================================
+  // STRATEGY 3: Fetch from External APIs (Fallback)
+  // ============================================
   const {
     data: volumeData,
     synthetic,
@@ -655,6 +699,7 @@ export async function GET(request: Request) {
     synthetic,
     poolCount,
     ohlcvCoverage,
+    source: 'api',
   })
 }
 
