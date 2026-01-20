@@ -20,6 +20,7 @@ import { isSupabaseConfigured, getSupabase, upsertVolumeSnapshots, registerPool,
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
+const DEXSCREENER_API = "https://api.dexscreener.com/latest"
 
 interface Pool {
   id: string
@@ -149,10 +150,66 @@ async function fetchPoolsFromGeckoTerminal(limit: number): Promise<Pool[]> {
 }
 
 /**
- * Try to fetch pools from Raydium, fall back to GeckoTerminal
+ * Fetch USD1 pools from DexScreener (often has more pools than GeckoTerminal)
+ */
+async function fetchPoolsFromDexScreener(limit: number): Promise<Pool[]> {
+  console.log("[Backfill] Trying DexScreener...")
+
+  const url = `${DEXSCREENER_API}/dex/tokens/${USD1_MINT}`
+  const response = await fetch(url, {
+    headers: { Accept: "application/json" },
+  })
+
+  if (!response.ok) {
+    throw new Error(`DexScreener API error: ${response.status}`)
+  }
+
+  const data = await response.json()
+  const dexPairs = data.pairs || []
+
+  console.log(`[Backfill] DexScreener returned ${dexPairs.length} pairs`)
+
+  // Filter for Raydium pools only (BONK.fun uses Raydium)
+  const raydiumPairs = dexPairs.filter((p: any) =>
+    p.dexId === 'raydium' && p.chainId === 'solana'
+  )
+
+  console.log(`[Backfill] Found ${raydiumPairs.length} Raydium pools`)
+
+  const pools: Pool[] = []
+  for (const pair of raydiumPairs.slice(0, limit)) {
+    const poolAddress = pair.pairAddress
+    const baseSymbol = pair.baseToken?.symbol || "UNKNOWN"
+    const quoteSymbol = pair.quoteToken?.symbol || "USD1"
+    const baseMint = pair.baseToken?.address || ""
+    const quoteMint = pair.quoteToken?.address || ""
+
+    // Determine which side is USD1
+    const isBaseUsd1 = baseMint === USD1_MINT
+
+    pools.push({
+      id: poolAddress,
+      mintA: {
+        address: isBaseUsd1 ? USD1_MINT : baseMint,
+        symbol: isBaseUsd1 ? "USD1" : baseSymbol,
+        name: isBaseUsd1 ? "USD1" : baseSymbol
+      },
+      mintB: {
+        address: isBaseUsd1 ? quoteMint : USD1_MINT,
+        symbol: isBaseUsd1 ? quoteSymbol : "USD1",
+        name: isBaseUsd1 ? quoteSymbol : "USD1"
+      }
+    })
+  }
+
+  return pools
+}
+
+/**
+ * Try to fetch pools from multiple sources (Raydium -> DexScreener -> GeckoTerminal)
  */
 async function fetchPools(limit: number): Promise<Pool[]> {
-  // Try Raydium first
+  // Try Raydium first (most accurate for BONK.fun)
   try {
     const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=${limit}`
     const poolsResponse = await fetchWithRetry(poolsUrl)
@@ -166,13 +223,24 @@ async function fetchPools(limit: number): Promise<Pool[]> {
     console.log(`[Backfill] Raydium failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
+  // Try DexScreener (usually has more pools indexed)
+  try {
+    const pools = await fetchPoolsFromDexScreener(limit)
+    if (pools.length > 0) {
+      console.log(`[Backfill] Got ${pools.length} pools from DexScreener`)
+      return pools
+    }
+  } catch (error) {
+    console.log(`[Backfill] DexScreener failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
+
   // Fallback to GeckoTerminal
   try {
     const pools = await fetchPoolsFromGeckoTerminal(limit)
     console.log(`[Backfill] Got ${pools.length} pools from GeckoTerminal`)
     return pools
   } catch (error) {
-    throw new Error(`Both Raydium and GeckoTerminal failed. Last error: ${error instanceof Error ? error.message : 'Unknown'}`)
+    throw new Error(`All APIs failed (Raydium, DexScreener, GeckoTerminal). Last error: ${error instanceof Error ? error.message : 'Unknown'}`)
   }
 }
 
