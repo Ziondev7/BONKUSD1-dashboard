@@ -16,6 +16,131 @@ import { NextRequest, NextResponse } from "next/server"
 import { isHeliusConfigured, fetchAllPoolHistory, aggregateSwapsToHourly } from "@/lib/helius"
 import { isSupabaseConfigured, getSupabase, upsertVolumeSnapshots, registerPool, updateSyncStatus } from "@/lib/supabase"
 
+interface OHLCVCandle {
+  timestamp: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+/**
+ * Fetch historical OHLCV data from GeckoTerminal
+ * This provides pre-aggregated volume data which is much more reliable than parsing transactions
+ */
+async function fetchOHLCVFromGeckoTerminal(
+  poolAddress: string,
+  timeframe: 'hour' | 'day' = 'hour',
+  limit: number = 1000
+): Promise<OHLCVCandle[]> {
+  const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?limit=${limit}`
+
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" }
+    })
+
+    if (!response.ok) {
+      console.log(`[GeckoTerminal OHLCV] API error: ${response.status}`)
+      return []
+    }
+
+    const data = await response.json()
+    const ohlcvList = data.data?.attributes?.ohlcv_list || []
+
+    // GeckoTerminal returns [timestamp, open, high, low, close, volume]
+    return ohlcvList.map((candle: number[]) => ({
+      timestamp: candle[0] * 1000, // Convert to milliseconds
+      open: candle[1],
+      high: candle[2],
+      low: candle[3],
+      close: candle[4],
+      volume: candle[5]
+    }))
+  } catch (error) {
+    console.log(`[GeckoTerminal OHLCV] Error: ${error instanceof Error ? error.message : 'Unknown'}`)
+    return []
+  }
+}
+
+/**
+ * Fetch complete historical volume using OHLCV (primary) or Helius (fallback)
+ */
+async function fetchHistoricalVolume(
+  poolAddress: string,
+  tokenSymbol: string,
+  daysBack: number
+): Promise<{ timestamp: number; volume: number; trades: number }[]> {
+  console.log(`[Backfill] Fetching OHLCV data for ${tokenSymbol}...`)
+
+  // Try hourly data first (more granular)
+  let hourlyCandles = await fetchOHLCVFromGeckoTerminal(poolAddress, 'hour', 1000)
+
+  if (hourlyCandles.length > 0) {
+    console.log(`[Backfill] Got ${hourlyCandles.length} hourly candles from GeckoTerminal`)
+
+    // Filter to requested time range
+    const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000
+    hourlyCandles = hourlyCandles.filter(c => c.timestamp >= cutoffTime)
+
+    // Convert to our format (estimate trades as 1 per $1000 volume)
+    return hourlyCandles.map(c => ({
+      timestamp: c.timestamp,
+      volume: c.volume,
+      trades: Math.max(1, Math.floor(c.volume / 1000))
+    }))
+  }
+
+  // Try daily data as fallback (less granular but more historical coverage)
+  console.log(`[Backfill] No hourly data, trying daily candles...`)
+  let dailyCandles = await fetchOHLCVFromGeckoTerminal(poolAddress, 'day', 365)
+
+  if (dailyCandles.length > 0) {
+    console.log(`[Backfill] Got ${dailyCandles.length} daily candles from GeckoTerminal`)
+
+    const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000
+    dailyCandles = dailyCandles.filter(c => c.timestamp >= cutoffTime)
+
+    // Split daily volume into hourly estimates for better chart display
+    const hourlyData: { timestamp: number; volume: number; trades: number }[] = []
+    for (const candle of dailyCandles) {
+      // Distribute daily volume across 24 hours (simplified even distribution)
+      const hourlyVolume = candle.volume / 24
+      const hourlyTrades = Math.max(1, Math.floor(hourlyVolume / 1000))
+
+      for (let h = 0; h < 24; h++) {
+        hourlyData.push({
+          timestamp: candle.timestamp + h * 60 * 60 * 1000,
+          volume: hourlyVolume,
+          trades: hourlyTrades
+        })
+      }
+    }
+    return hourlyData
+  }
+
+  // Final fallback: Helius transaction parsing
+  if (isHeliusConfigured()) {
+    console.log(`[Backfill] No OHLCV data, falling back to Helius...`)
+    const startTime = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000)
+
+    const swaps = await fetchAllPoolHistory(poolAddress, {
+      startTime,
+      onProgress: (count) => {
+        console.log(`[Backfill] ${tokenSymbol}: Fetched ${count} transactions...`)
+      }
+    })
+
+    if (swaps.length > 0) {
+      return aggregateSwapsToHourly(swaps)
+    }
+  }
+
+  console.log(`[Backfill] No historical data found for ${tokenSymbol}`)
+  return []
+}
+
 // Constants - USD1 stablecoin (BONK.fun pairs)
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
@@ -289,14 +414,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  // Check configuration
-  if (!isHeliusConfigured()) {
-    return NextResponse.json(
-      { error: "Helius not configured. Set HELIUS_API_KEY in environment." },
-      { status: 500 }
-    )
-  }
-
+  // Check configuration - Supabase is required, Helius is optional (GeckoTerminal is primary)
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
       { error: "Supabase not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
@@ -308,7 +426,6 @@ export async function POST(request: NextRequest) {
   const poolLimit = parseInt(searchParams.get("poolLimit") || "50")
   const daysBack = parseInt(searchParams.get("daysBack") || "30")
 
-  const startTime = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000)
   const results: { pool: string; status: string; snapshots?: number; error?: string }[] = []
 
   console.log(`[Backfill] Starting backfill for ${poolLimit} pools, ${daysBack} days back`)
@@ -352,16 +469,11 @@ export async function POST(request: NextRequest) {
           status: 'syncing'
         })
 
-        // Fetch historical swaps
-        const swaps = await fetchAllPoolHistory(poolAddress, {
-          startTime,
-          onProgress: (count) => {
-            console.log(`[Backfill] ${tokenSymbol}: Fetched ${count} transactions...`)
-          }
-        })
+        // Fetch historical volume using OHLCV (primary) or Helius (fallback)
+        const hourlyData = await fetchHistoricalVolume(poolAddress, tokenSymbol, daysBack)
 
-        if (swaps.length === 0) {
-          console.log(`[Backfill] ${tokenSymbol}: No swaps found`)
+        if (hourlyData.length === 0) {
+          console.log(`[Backfill] ${tokenSymbol}: No volume data found`)
           await updateSyncStatus({
             pool_address: poolAddress,
             status: 'completed',
@@ -370,9 +482,6 @@ export async function POST(request: NextRequest) {
           results.push({ pool: tokenSymbol, status: 'no_data' })
           continue
         }
-
-        // Aggregate to hourly buckets
-        const hourlyData = aggregateSwapsToHourly(swaps)
 
         // Convert to volume snapshots
         const snapshots = hourlyData.map(h => ({
@@ -450,10 +559,10 @@ export async function GET() {
   return NextResponse.json({
     endpoint: "/api/backfill",
     method: "POST",
-    description: "One-time historical data backfill",
+    description: "One-time historical data backfill using GeckoTerminal OHLCV (primary) or Helius (fallback)",
     requirements: {
-      helius: isHeliusConfigured(),
-      supabase: isSupabaseConfigured()
+      supabase: isSupabaseConfigured(),
+      helius: isHeliusConfigured() ? "configured (fallback)" : "not configured (optional)"
     },
     params: {
       poolLimit: "Max pools to process (default: 50)",
