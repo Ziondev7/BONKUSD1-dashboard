@@ -42,6 +42,7 @@ interface VolumeHistoryResponse {
   synthetic?: boolean
   poolCount?: number
   ohlcvCoverage?: number // Percentage of volume covered by real OHLCV data
+  dataSource?: "ohlcv" | "snapshots" | "synthetic" // Source of the data
 }
 
 const PERIODS = [
@@ -329,19 +330,27 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
           <h2 className="font-mono font-bold text-sm tracking-wide">VOLUME EVOLUTION</h2>
           <span className="text-white/30 font-mono text-xs">// USD1 PAIRS</span>
           {/* Data quality indicators */}
-          {data?.synthetic ? (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-bonk/10 border border-bonk/20" title="Historical OHLCV unavailable - showing distribution based on actual 24h volume from all pools">
+          {data?.dataSource === "synthetic" || data?.synthetic ? (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-bonk/10 border border-bonk/20" title="Historical data unavailable - showing estimated distribution based on current 24h volume">
               <AlertTriangle className="w-3 h-3 text-bonk" />
-              <span className="text-[10px] font-bold text-bonk tracking-wide">ESTIMATED DISTRIBUTION</span>
+              <span className="text-[10px] font-bold text-bonk tracking-wide">ESTIMATED</span>
             </div>
-          ) : data?.ohlcvCoverage && data.ohlcvCoverage > 0 ? (
+          ) : data?.dataSource === "snapshots" ? (
             <div
               className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20"
-              title={`Real OHLCV data from top ${data.poolCount || 0} pools covering ${data.ohlcvCoverage.toFixed(0)}% of total volume`}
+              title={`Historical data from ${data.dataPoints} stored snapshots - accurate rolling 24h volume over time`}
+            >
+              <Activity className="w-3 h-3 text-success" />
+              <span className="text-[10px] font-bold text-success tracking-wide">HISTORICAL DATA</span>
+            </div>
+          ) : data?.dataSource === "ohlcv" || (data?.ohlcvCoverage && data.ohlcvCoverage > 0) ? (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20"
+              title={`Real OHLCV data from top ${data.poolCount || 0} pools covering ${(data.ohlcvCoverage || 0).toFixed(0)}% of total volume`}
             >
               <Activity className="w-3 h-3 text-success" />
               <span className="text-[10px] font-bold text-success tracking-wide">
-                {data.ohlcvCoverage >= 80 ? "LIVE DATA" : `${data.ohlcvCoverage.toFixed(0)}% COVERAGE`}
+                {(data.ohlcvCoverage || 0) >= 80 ? "LIVE DATA" : `${(data.ohlcvCoverage || 0).toFixed(0)}% COVERAGE`}
               </span>
             </div>
           ) : null}
