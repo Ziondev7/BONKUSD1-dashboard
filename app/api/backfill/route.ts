@@ -177,6 +177,7 @@ const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 const DEXSCREENER_API = "https://api.dexscreener.com/latest"
+const BONKUSD1_API = "https://bonkusd1.fun/api/tokens" // Our dashboard API with ALL tokens
 
 // Tokens to EXCLUDE (stablecoins, major tokens - NOT bonk.fun meme tokens)
 const EXCLUDED_TOKENS = new Set([
@@ -401,27 +402,95 @@ async function fetchPoolsFromDexScreener(limit: number): Promise<Pool[]> {
 }
 
 /**
+ * Fetch ALL pools from bonkusd1.fun API (primary source - has all 600+ tokens)
+ */
+async function fetchPoolsFromBonkUsd1Api(): Promise<Pool[]> {
+  console.log("[Backfill] Fetching ALL pools from bonkusd1.fun API...")
+
+  try {
+    const response = await fetch(BONKUSD1_API, {
+      headers: { Accept: "application/json" },
+    })
+
+    if (!response.ok) {
+      throw new Error(`bonkusd1.fun API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const tokens = data.tokens || []
+
+    console.log(`[Backfill] bonkusd1.fun API returned ${tokens.length} tokens`)
+
+    const pools: Pool[] = []
+    for (const token of tokens) {
+      // Skip tokens without pool address
+      if (!token.pairAddress) continue
+
+      // Skip excluded tokens
+      if (EXCLUDED_SYMBOLS.has(token.symbol?.toUpperCase())) {
+        continue
+      }
+
+      pools.push({
+        id: token.pairAddress,
+        mintA: {
+          address: token.address || "",
+          symbol: token.symbol || "UNKNOWN",
+          name: token.name || token.symbol || "UNKNOWN"
+        },
+        mintB: {
+          address: USD1_MINT,
+          symbol: "USD1",
+          name: "USD1"
+        }
+      })
+    }
+
+    return pools
+  } catch (error) {
+    console.log(`[Backfill] bonkusd1.fun API failed: ${error instanceof Error ? error.message : 'Unknown'}`)
+    return []
+  }
+}
+
+/**
  * Fetch ALL pools from multiple sources and combine them (no duplicates)
+ * Priority: bonkusd1.fun API (most complete) > DexScreener > GeckoTerminal > Raydium
  */
 async function fetchPools(limit: number): Promise<Pool[]> {
   const allPools = new Map<string, Pool>() // Use Map to deduplicate by pool address
 
-  // Try DexScreener first (usually has many pools)
+  // Try bonkusd1.fun API first (most complete - has all 600+ tokens)
   try {
-    console.log("[Backfill] Fetching from DexScreener...")
-    const dexPools = await fetchPoolsFromDexScreener(9999) // Get all, not limited
-    for (const pool of dexPools) {
+    const bonkPools = await fetchPoolsFromBonkUsd1Api()
+    for (const pool of bonkPools) {
       allPools.set(pool.id, pool)
     }
-    console.log(`[Backfill] DexScreener: ${dexPools.length} pools`)
+    console.log(`[Backfill] bonkusd1.fun: ${bonkPools.length} pools`)
+  } catch (error) {
+    console.log(`[Backfill] bonkusd1.fun failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
+
+  // Also try DexScreener (might have pools not in bonkusd1.fun)
+  try {
+    console.log("[Backfill] Fetching from DexScreener...")
+    const dexPools = await fetchPoolsFromDexScreener(9999)
+    let newFromDex = 0
+    for (const pool of dexPools) {
+      if (!allPools.has(pool.id)) {
+        allPools.set(pool.id, pool)
+        newFromDex++
+      }
+    }
+    console.log(`[Backfill] DexScreener: ${dexPools.length} pools (${newFromDex} new)`)
   } catch (error) {
     console.log(`[Backfill] DexScreener failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
-  // Also try GeckoTerminal (might have different pools indexed)
+  // Also try GeckoTerminal
   try {
     console.log("[Backfill] Fetching from GeckoTerminal...")
-    const geckoPools = await fetchPoolsFromGeckoTerminal(9999) // Get all, not limited
+    const geckoPools = await fetchPoolsFromGeckoTerminal(9999)
     let newFromGecko = 0
     for (const pool of geckoPools) {
       if (!allPools.has(pool.id)) {
@@ -432,27 +501,6 @@ async function fetchPools(limit: number): Promise<Pool[]> {
     console.log(`[Backfill] GeckoTerminal: ${geckoPools.length} pools (${newFromGecko} new)`)
   } catch (error) {
     console.log(`[Backfill] GeckoTerminal failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
-  }
-
-  // Also try Raydium (might have additional pools)
-  try {
-    console.log("[Backfill] Fetching from Raydium...")
-    const poolsUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume24h&sortType=desc&pageSize=500`
-    const poolsResponse = await fetchWithRetry(poolsUrl)
-    const poolsData = await poolsResponse.json()
-
-    if (poolsData.success && poolsData.data?.data?.length > 0) {
-      let newFromRaydium = 0
-      for (const pool of poolsData.data.data) {
-        if (!allPools.has(pool.id)) {
-          allPools.set(pool.id, pool)
-          newFromRaydium++
-        }
-      }
-      console.log(`[Backfill] Raydium: ${poolsData.data.data.length} pools (${newFromRaydium} new)`)
-    }
-  } catch (error) {
-    console.log(`[Backfill] Raydium failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 
   const pools = Array.from(allPools.values())
