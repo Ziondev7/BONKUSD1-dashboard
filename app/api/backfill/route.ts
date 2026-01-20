@@ -97,7 +97,7 @@ async function fetchAllUSD1Pools(): Promise<PoolInfo[]> {
     const maxPages = 5
 
     for (let page = 1; page <= maxPages; page++) {
-      const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=volume&sortType=desc&pageSize=${pageSize}&page=${page}`
+      const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=default&sortType=desc&pageSize=${pageSize}&page=${page}`
       const response = await fetchWithTimeout(url)
 
       if (!response.ok) {
