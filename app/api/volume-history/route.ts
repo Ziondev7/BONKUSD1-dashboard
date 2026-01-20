@@ -4,6 +4,9 @@ const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 
+// BONK.fun uses Raydium LaunchLab - graduated tokens go to CPMM pools
+const BONKFUN_POOL_TYPES = ["cpmm"]
+
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
 
@@ -58,7 +61,7 @@ function shouldExclude(symbol?: string): boolean {
   return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
 }
 
-// Fetch all USD1 pools from Raydium (these are BONK.fun token pairs)
+// Fetch BONK.fun LaunchLab USD1 pools from Raydium (CPMM pools only)
 async function fetchRaydiumUSD1Pools(): Promise<{ pools: RaydiumPool[]; totalVolume24h: number }> {
   const pools: RaydiumPool[] = []
   let totalVolume24h = 0
@@ -66,20 +69,6 @@ async function fetchRaydiumUSD1Pools(): Promise<{ pools: RaydiumPool[]; totalVol
   try {
     const pageSize = 500
     const maxPages = 5
-
-    // Fetch first page
-    const firstPageUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
-    const firstResponse = await fetchWithTimeout(firstPageUrl)
-
-    if (!firstResponse.ok) {
-      console.error("[Volume] Raydium API error:", firstResponse.status)
-      return { pools: [], totalVolume24h: 0 }
-    }
-
-    const firstJson = await firstResponse.json()
-    if (!firstJson.success || !firstJson.data?.data) {
-      return { pools: [], totalVolume24h: 0 }
-    }
 
     const processPool = (pool: any) => {
       const mintA = pool.mintA?.address
@@ -111,33 +100,50 @@ async function fetchRaydiumUSD1Pools(): Promise<{ pools: RaydiumPool[]; totalVol
       })
     }
 
-    // Process first page
-    firstJson.data.data.forEach(processPool)
+    // Fetch ONLY CPMM pools - these are BONK.fun LaunchLab graduated tokens
+    const fetchPoolType = async (poolType: string) => {
+      const firstPageUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=${poolType}&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
+      const firstResponse = await fetchWithTimeout(firstPageUrl)
 
-    const totalCount = firstJson.data.count || firstJson.data.data.length
-    const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
-
-    // Fetch remaining pages in parallel
-    if (totalPages > 1 && firstJson.data.data.length >= pageSize) {
-      const pagePromises = []
-      for (let page = 2; page <= totalPages; page++) {
-        const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
-        pagePromises.push(
-          fetchWithTimeout(url, 8000)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null)
-        )
+      if (!firstResponse.ok) {
+        console.error("[Volume] Raydium API error:", firstResponse.status)
+        return
       }
 
-      const results = await Promise.all(pagePromises)
-      results.forEach(json => {
-        if (json?.success && json.data?.data) {
-          json.data.data.forEach(processPool)
+      const firstJson = await firstResponse.json()
+      if (!firstJson.success || !firstJson.data?.data) return
+
+      // Process first page
+      firstJson.data.data.forEach(processPool)
+
+      const totalCount = firstJson.data.count || firstJson.data.data.length
+      const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
+
+      // Fetch remaining pages in parallel
+      if (totalPages > 1 && firstJson.data.data.length >= pageSize) {
+        const pagePromises = []
+        for (let page = 2; page <= totalPages; page++) {
+          const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=${poolType}&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
+          pagePromises.push(
+            fetchWithTimeout(url, 8000)
+              .then(res => res.ok ? res.json() : null)
+              .catch(() => null)
+          )
         }
-      })
+
+        const results = await Promise.all(pagePromises)
+        results.forEach(json => {
+          if (json?.success && json.data?.data) {
+            json.data.data.forEach(processPool)
+          }
+        })
+      }
     }
 
-    console.log(`[Volume] Found ${pools.length} BONK.fun/USD1 pools on Raydium with total 24h volume: $${totalVolume24h.toLocaleString()}`)
+    // Fetch all BONK.fun pool types (CPMM for LaunchLab graduated tokens)
+    await Promise.all(BONKFUN_POOL_TYPES.map(poolType => fetchPoolType(poolType)))
+
+    console.log(`[Volume] Found ${pools.length} BONK.fun/USD1 LaunchLab pools (CPMM) with total 24h volume: $${totalVolume24h.toLocaleString()}`)
   } catch (error) {
     console.error("[Volume] Error fetching Raydium pools:", error)
   }
