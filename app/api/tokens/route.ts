@@ -12,8 +12,8 @@ const CONFIG = {
   // BONK.fun uses Raydium LaunchLab - graduated tokens go to CPMM pools
   RAYDIUM_LAUNCHLAB_PROGRAM: "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
   RAYDIUM_CPMM_PROGRAM: "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
-  // Pool types for BONK.fun graduated tokens (CPMM is primary for LaunchLab)
-  BONKFUN_POOL_TYPES: ["cpmm"],
+  // Pool types for BONK.fun graduated tokens (can be CPMM or Standard AMM V4)
+  BONKFUN_POOL_TYPES: ["cpmm", "standard"],
   EXCLUDED_SYMBOLS: ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"],
   MAX_MCAP_LIQUIDITY_RATIO: 100,
   MIN_LIQUIDITY_USD: 100,

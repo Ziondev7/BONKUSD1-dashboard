@@ -3,8 +3,8 @@ import { NextResponse } from "next/server"
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 
-// BONK.fun uses Raydium LaunchLab - graduated tokens go to CPMM pools
-const BONKFUN_POOL_TYPES = ["cpmm"]
+// BONK.fun uses Raydium LaunchLab - graduated tokens go to CPMM or Standard AMM V4 pools
+const BONKFUN_POOL_TYPES = ["cpmm", "standard"]
 
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
