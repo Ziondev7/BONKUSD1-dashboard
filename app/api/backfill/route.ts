@@ -66,6 +66,7 @@ async function fetchOHLCVFromGeckoTerminal(
 
 /**
  * Fetch complete historical volume using OHLCV (primary) or Helius (fallback)
+ * When daysBack is 0 or "all", fetches ALL available historical data
  */
 async function fetchHistoricalVolume(
   poolAddress: string,
@@ -74,56 +75,86 @@ async function fetchHistoricalVolume(
 ): Promise<{ timestamp: number; volume: number; trades: number }[]> {
   console.log(`[Backfill] Fetching OHLCV data for ${tokenSymbol}...`)
 
-  // Try hourly data first (more granular)
+  const fetchAll = daysBack === 0 // 0 means fetch all available data
+  const allData: { timestamp: number; volume: number; trades: number }[] = []
+
+  // STEP 1: Always fetch daily candles first for maximum historical coverage (up to 1000 days)
+  console.log(`[Backfill] Fetching daily candles for full history...`)
+  let dailyCandles = await fetchOHLCVFromGeckoTerminal(poolAddress, 'day', 1000)
+
+  if (dailyCandles.length > 0) {
+    console.log(`[Backfill] Got ${dailyCandles.length} daily candles from GeckoTerminal`)
+
+    // Filter to requested time range (skip if fetching all)
+    if (!fetchAll && daysBack > 0) {
+      const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000
+      dailyCandles = dailyCandles.filter(c => c.timestamp >= cutoffTime)
+    }
+
+    // Find the oldest and newest data points
+    if (dailyCandles.length > 0) {
+      const oldest = new Date(Math.min(...dailyCandles.map(c => c.timestamp)))
+      const newest = new Date(Math.max(...dailyCandles.map(c => c.timestamp)))
+      console.log(`[Backfill] Daily data range: ${oldest.toISOString().split('T')[0]} to ${newest.toISOString().split('T')[0]}`)
+    }
+
+    // Convert daily candles to our format
+    for (const candle of dailyCandles) {
+      allData.push({
+        timestamp: candle.timestamp,
+        volume: candle.volume,
+        trades: Math.max(1, Math.floor(candle.volume / 1000))
+      })
+    }
+  }
+
+  // STEP 2: Also fetch hourly candles for recent data (more granular, last ~41 days)
+  console.log(`[Backfill] Fetching hourly candles for recent granularity...`)
   let hourlyCandles = await fetchOHLCVFromGeckoTerminal(poolAddress, 'hour', 1000)
 
   if (hourlyCandles.length > 0) {
     console.log(`[Backfill] Got ${hourlyCandles.length} hourly candles from GeckoTerminal`)
 
-    // Filter to requested time range
-    const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000
-    hourlyCandles = hourlyCandles.filter(c => c.timestamp >= cutoffTime)
+    // Filter to requested time range (skip if fetching all)
+    if (!fetchAll && daysBack > 0) {
+      const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000
+      hourlyCandles = hourlyCandles.filter(c => c.timestamp >= cutoffTime)
+    }
 
-    // Convert to our format (estimate trades as 1 per $1000 volume)
-    return hourlyCandles.map(c => ({
-      timestamp: c.timestamp,
-      volume: c.volume,
-      trades: Math.max(1, Math.floor(c.volume / 1000))
+    // Merge hourly data - replace daily data with hourly where available
+    const hourlyTimestamps = new Set(hourlyCandles.map(c => {
+      // Round to day for comparison
+      return Math.floor(c.timestamp / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000
     }))
+
+    // Remove daily data that overlaps with hourly data
+    const filteredDaily = allData.filter(d => !hourlyTimestamps.has(
+      Math.floor(d.timestamp / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000
+    ))
+
+    // Add hourly candles
+    for (const candle of hourlyCandles) {
+      filteredDaily.push({
+        timestamp: candle.timestamp,
+        volume: candle.volume,
+        trades: Math.max(1, Math.floor(candle.volume / 1000))
+      })
+    }
+
+    // Sort by timestamp
+    filteredDaily.sort((a, b) => a.timestamp - b.timestamp)
+    return filteredDaily
   }
 
-  // Try daily data as fallback (less granular but more historical coverage)
-  console.log(`[Backfill] No hourly data, trying daily candles...`)
-  let dailyCandles = await fetchOHLCVFromGeckoTerminal(poolAddress, 'day', 365)
-
-  if (dailyCandles.length > 0) {
-    console.log(`[Backfill] Got ${dailyCandles.length} daily candles from GeckoTerminal`)
-
-    const cutoffTime = Date.now() - daysBack * 24 * 60 * 60 * 1000
-    dailyCandles = dailyCandles.filter(c => c.timestamp >= cutoffTime)
-
-    // Split daily volume into hourly estimates for better chart display
-    const hourlyData: { timestamp: number; volume: number; trades: number }[] = []
-    for (const candle of dailyCandles) {
-      // Distribute daily volume across 24 hours (simplified even distribution)
-      const hourlyVolume = candle.volume / 24
-      const hourlyTrades = Math.max(1, Math.floor(hourlyVolume / 1000))
-
-      for (let h = 0; h < 24; h++) {
-        hourlyData.push({
-          timestamp: candle.timestamp + h * 60 * 60 * 1000,
-          volume: hourlyVolume,
-          trades: hourlyTrades
-        })
-      }
-    }
-    return hourlyData
+  if (allData.length > 0) {
+    allData.sort((a, b) => a.timestamp - b.timestamp)
+    return allData
   }
 
   // Final fallback: Helius transaction parsing
   if (isHeliusConfigured()) {
     console.log(`[Backfill] No OHLCV data, falling back to Helius...`)
-    const startTime = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000)
+    const startTime = fetchAll ? 0 : Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000)
 
     const swaps = await fetchAllPoolHistory(poolAddress, {
       startTime,
@@ -566,8 +597,12 @@ export async function GET() {
     },
     params: {
       poolLimit: "Max pools to process (default: 50)",
-      daysBack: "How far back to fetch (default: 30)"
+      daysBack: "How far back to fetch. Use 0 to fetch ALL available history (default: 30)"
     },
-    authorization: "Bearer YOUR_CRON_SECRET"
+    authorization: "Bearer YOUR_CRON_SECRET",
+    examples: {
+      fetchAll: "POST /api/backfill?daysBack=0 - Fetch all available historical data",
+      fetch30Days: "POST /api/backfill?daysBack=30 - Fetch last 30 days"
+    }
   })
 }
