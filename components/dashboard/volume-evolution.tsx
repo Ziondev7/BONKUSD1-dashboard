@@ -1,30 +1,37 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import useSWR from "swr"
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Activity, 
-  BarChart3,
-  Clock,
+import {
+  TrendingUp,
+  TrendingDown,
+  Activity,
   Zap,
-  ArrowUp,
-  ArrowDown,
-  Minus,
-  AlertTriangle,
-  Info
+  RefreshCw,
+  Clock,
+  Database,
+  BarChart3
 } from "lucide-react"
 import { formatNumber, formatCompactNumber, cn } from "@/lib/utils"
+
+// ============================================
+// TYPES
+// ============================================
 
 interface VolumeDataPoint {
   timestamp: number
   volume: number
-  trades?: number
+  poolCount?: number
 }
 
-interface VolumeHistoryResponse {
+interface TopPool {
+  symbol: string
+  volume24h: number
+  tvl: number
+}
+
+interface VolumeResponse {
   history: VolumeDataPoint[]
   stats: {
     current: number
@@ -35,117 +42,127 @@ interface VolumeHistoryResponse {
     average: number
     totalVolume: number
   }
-  period: string
+  poolCount: number
+  topPools: TopPool[]
+  raydiumVolume24h: number
+  source: string
+  interval: string
   dataPoints: number
+  lastUpdated: number
   cached?: boolean
-  synthetic?: boolean
-  source?: string
-  poolCount?: number
-  topPools?: Array<{ symbol: string; volume24h: number }>
+  cacheAge?: number
 }
 
-const PERIODS = [
-  { id: "24h", label: "24H" },
-  { id: "7d", label: "7D" },
-  { id: "1m", label: "1M" },
-  { id: "all", label: "ALL" },
+// ============================================
+// CONSTANTS
+// ============================================
+
+const INTERVALS = [
+  { id: "5m", label: "5M", description: "5 minute candles" },
+  { id: "15m", label: "15M", description: "15 minute candles" },
+  { id: "1h", label: "1H", description: "Hourly candles" },
+  { id: "4h", label: "4H", description: "4 hour candles" },
+  { id: "24h", label: "1D", description: "Daily candles" },
+  { id: "7d", label: "7D", description: "7 day view" },
+  { id: "30d", label: "30D", description: "30 day view" },
 ]
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
-// Yellow candlestick bar chart component
-function VolumeChart({ 
-  data, 
-  isPositive,
-  period 
-}: { 
+// ============================================
+// VOLUME CHART COMPONENT
+// ============================================
+
+function VolumeChart({
+  data,
+  interval
+}: {
   data: VolumeDataPoint[]
-  isPositive: boolean 
-  period: string
+  interval: string
 }) {
-  const [hoveredBar, setHoveredBar] = useState<{ index: number; x: number; y: number } | null>(null)
-  
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null)
+
   const volumes = data.map(d => d.volume)
   const max = Math.max(...volumes) * 1.1
   const min = 0
 
-  // Format time label based on period
-  const formatTimeLabel = (timestamp: number): string => {
+  // Format time label based on interval
+  const getTimeLabel = useCallback((timestamp: number): string => {
     const date = new Date(timestamp)
-    if (period === "24h") {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    } else if (period === "7d") {
-      return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit' })
-    } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    switch (interval) {
+      case "5m":
+      case "15m":
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      case "1h":
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      case "4h":
+        return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit' })
+      case "24h":
+        return date.toLocaleDateString([], { weekday: 'short' })
+      case "7d":
+      case "30d":
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      default:
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
     }
-  }
+  }, [interval])
 
-  // Get full date string for tooltip
-  const getFullDateLabel = (timestamp: number): string => {
+  // Full date for tooltip
+  const getFullDate = useCallback((timestamp: number): string => {
     const date = new Date(timestamp)
-    if (period === "24h") {
-      return date.toLocaleString([], { 
-        weekday: 'short',
-        hour: '2-digit', 
-        minute: '2-digit'
-      })
-    } else if (period === "7d") {
-      return date.toLocaleDateString([], { 
-        weekday: 'long',
-        month: 'short',
-        day: 'numeric'
-      })
-    } else if (period === "1m") {
-      return date.toLocaleDateString([], { 
-        weekday: 'long',
-        month: 'long', 
-        day: 'numeric',
-        year: 'numeric'
-      })
-    } else {
-      // All time - show month/year for monthly candles
-      return date.toLocaleDateString([], { 
-        month: 'long', 
-        year: 'numeric'
-      })
+    switch (interval) {
+      case "5m":
+      case "15m":
+      case "1h":
+        return date.toLocaleString([], {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      case "4h":
+        return date.toLocaleString([], {
+          weekday: 'long',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit'
+        })
+      default:
+        return date.toLocaleDateString([], {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric'
+        })
     }
-  }
+  }, [interval])
 
-  // Generate time labels for x-axis
-  const timeLabels = useMemo(() => {
+  // Generate x-axis labels
+  const xLabels = useMemo(() => {
     if (data.length < 2) return []
     const labels: { index: number; label: string }[] = []
     const step = Math.max(1, Math.floor(data.length / 6))
-    
+
     for (let i = 0; i < data.length; i += step) {
-      const date = new Date(data[i].timestamp)
-      let label: string
-      if (period === "24h") {
-        label = date.getHours().toString().padStart(2, '0') + ':00'
-      } else if (period === "7d") {
-        label = date.toLocaleDateString([], { weekday: 'short' })
-      } else if (period === "1m") {
-        label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      } else {
-        // All time - show month abbreviation for monthly candles
-        label = date.toLocaleDateString([], { month: 'short' })
-      }
-      labels.push({ index: i, label })
+      labels.push({
+        index: i,
+        label: getTimeLabel(data[i].timestamp)
+      })
     }
     return labels
-  }, [data, period])
+  }, [data, getTimeLabel])
 
   if (data.length < 2) {
     return (
-      <div className="h-48 flex items-center justify-center text-white/30 font-mono text-sm">
-        Not enough data points
+      <div className="h-56 flex items-center justify-center text-white/30 font-mono text-sm">
+        <div className="flex flex-col items-center gap-2">
+          <BarChart3 className="w-8 h-8 opacity-50" />
+          <span>Not enough data points</span>
+        </div>
       </div>
     )
   }
-
-  const barWidth = Math.max(2, Math.min(12, (100 / data.length) * 0.7))
-  const gap = Math.max(1, (100 / data.length) * 0.3)
 
   return (
     <div className="relative h-56">
@@ -153,50 +170,40 @@ function VolumeChart({
       <div className="absolute inset-0 flex items-end justify-between px-1 pb-8">
         {data.map((d, i) => {
           const heightPercent = max > 0 ? ((d.volume - min) / (max - min)) * 100 : 0
-          const isHovered = hoveredBar?.index === i
-          
+          const isHovered = hoveredBar === i
+
           return (
             <div
               key={i}
               className="relative flex flex-col items-center justify-end h-full"
-              style={{ width: `${barWidth}%` }}
-              onMouseEnter={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                setHoveredBar({ 
-                  index: i, 
-                  x: rect.left + rect.width / 2,
-                  y: rect.top
-                })
-              }}
+              style={{ width: `${Math.max(2, 85 / data.length)}%` }}
+              onMouseEnter={() => setHoveredBar(i)}
               onMouseLeave={() => setHoveredBar(null)}
             >
-              {/* The candle/bar */}
               <motion.div
                 initial={{ height: 0 }}
                 animate={{ height: `${Math.max(heightPercent, 2)}%` }}
-                transition={{ duration: 0.5, delay: i * 0.01 }}
+                transition={{ duration: 0.4, delay: i * 0.005 }}
                 className={cn(
                   "w-full rounded-t-sm cursor-pointer transition-all duration-150",
-                  isHovered 
-                    ? "bg-bonk shadow-[0_0_15px_rgba(250,204,21,0.6)]" 
+                  isHovered
+                    ? "bg-bonk shadow-[0_0_15px_rgba(250,204,21,0.6)]"
                     : "bg-bonk/70 hover:bg-bonk"
                 )}
-                style={{
-                  minHeight: '4px',
-                }}
+                style={{ minHeight: '4px' }}
               />
             </div>
           )
         })}
       </div>
 
-      {/* X-axis time labels */}
+      {/* X-axis labels */}
       <div className="absolute bottom-0 left-0 right-0 flex justify-between px-1 text-[10px] font-mono text-white/30">
-        {timeLabels.map((item, i) => (
-          <span 
-            key={i} 
+        {xLabels.map((item, i) => (
+          <span
+            key={i}
             className="text-center"
-            style={{ 
+            style={{
               position: 'absolute',
               left: `${(item.index / data.length) * 100}%`,
               transform: 'translateX(-50%)'
@@ -220,14 +227,14 @@ function VolumeChart({
 
       {/* Tooltip */}
       <AnimatePresence>
-        {hoveredBar !== null && data[hoveredBar.index] && (
+        {hoveredBar !== null && data[hoveredBar] && (
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 5 }}
             className="absolute z-50 pointer-events-none"
             style={{
-              left: `${(hoveredBar.index / data.length) * 100}%`,
+              left: `${(hoveredBar / data.length) * 100}%`,
               bottom: '100%',
               transform: 'translateX(-50%)',
               marginBottom: '8px'
@@ -235,12 +242,16 @@ function VolumeChart({
           >
             <div className="bg-[#0a0a0c] border border-bonk/30 rounded-lg px-3 py-2 shadow-[0_0_20px_rgba(250,204,21,0.2)]">
               <p className="text-bonk font-mono text-xs font-bold mb-1">
-                {getFullDateLabel(data[hoveredBar.index].timestamp)}
+                {getFullDate(data[hoveredBar].timestamp)}
               </p>
               <p className="text-white font-mono text-sm font-bold">
-                ${formatNumber(data[hoveredBar.index].volume)}
+                ${formatNumber(data[hoveredBar].volume)}
               </p>
-              {/* Arrow */}
+              {data[hoveredBar].poolCount && (
+                <p className="text-white/50 font-mono text-[10px] mt-0.5">
+                  {data[hoveredBar].poolCount} pools
+                </p>
+              )}
               <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent border-t-bonk/30" />
             </div>
           </motion.div>
@@ -250,70 +261,72 @@ function VolumeChart({
   )
 }
 
-// Stats card component
-function StatCard({ 
-  label, 
-  value, 
-  icon: Icon, 
-  change,
-  color = "default"
-}: { 
-  label: string
-  value: string
-  icon: any
-  change?: number
-  color?: "default" | "success" | "danger"
-}) {
-  const colorClasses = {
-    default: "text-white/40",
-    success: "text-success",
-    danger: "text-danger",
-  }
+// ============================================
+// TOP POOLS COMPONENT
+// ============================================
+
+function TopPoolsList({ pools }: { pools: TopPool[] }) {
+  if (!pools || pools.length === 0) return null
 
   return (
-    <div className="glass-card-solid p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className={cn("w-4 h-4", colorClasses[color])} />
-        <span className="text-white/40 text-[10px] font-mono tracking-[0.15em] uppercase">
-          {label}
-        </span>
+    <div className="mt-6 pt-6 border-t border-white/[0.04]">
+      <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-3">
+        TOP POOLS BY LIQUIDITY
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {pools.map((pool, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] hover:border-bonk/30 transition-colors"
+          >
+            <span className="text-bonk font-mono font-bold text-sm">${pool.symbol}</span>
+            <div className="w-px h-4 bg-white/10" />
+            <span className="text-white/40 font-mono text-xs">
+              TVL: ${formatCompactNumber(pool.tvl)}
+            </span>
+          </div>
+        ))}
       </div>
-      <p className="text-xl font-mono font-bold text-white">{value}</p>
-      {change !== undefined && (
-        <div className={cn(
-          "flex items-center gap-1 mt-1 text-xs font-mono",
-          change >= 0 ? "text-success" : "text-danger"
-        )}>
-          {change >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-          {Math.abs(change).toFixed(1)}%
-        </div>
-      )}
     </div>
   )
 }
 
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
 interface VolumeEvolutionProps {
-  currentVolume?: number // Real-time volume from tokens API to sync with metrics grid
+  currentVolume?: number
 }
 
 export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
-  const [period, setPeriod] = useState("24h")
-  
-  const { data, error, isLoading } = useSWR<VolumeHistoryResponse>(
-    `/api/volume-history?period=${period}`,
+  const [interval, setInterval] = useState("1h")
+
+  const { data, error, isLoading, mutate } = useSWR<VolumeResponse>(
+    `/api/volume?interval=${interval}`,
     fetcher,
     {
-      refreshInterval: 60000, // Refresh every minute
+      refreshInterval: 30000, // Refresh every 30 seconds
       revalidateOnFocus: false,
+      dedupingInterval: 5000,
     }
   )
 
-  // Use currentVolume from props for 24h period to match metrics grid
-  const displayVolume = period === "24h" && currentVolume 
-    ? currentVolume 
-    : (data?.stats.totalVolume || data?.stats.current || 0)
+  // Use currentVolume from props for short intervals to match metrics grid
+  const displayVolume = (interval === "5m" || interval === "15m" || interval === "1h") && currentVolume
+    ? currentVolume
+    : (data?.stats.totalVolume || 0)
 
   const isPositive = (data?.stats.change ?? 0) >= 0
+
+  // Format last updated time
+  const lastUpdatedText = useMemo(() => {
+    if (!data?.lastUpdated) return null
+    const seconds = Math.floor((Date.now() - data.lastUpdated) / 1000)
+    if (seconds < 60) return `${seconds}s ago`
+    const minutes = Math.floor(seconds / 60)
+    return `${minutes}m ago`
+  }, [data?.lastUpdated])
 
   return (
     <motion.section
@@ -323,33 +336,42 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
       className="mb-10"
     >
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
+        <div className="flex items-center gap-3 flex-wrap">
           <Activity className="w-5 h-5 text-bonk" />
-          <h2 className="font-mono font-bold text-sm tracking-wide">VOLUME</h2>
+          <h2 className="font-mono font-bold text-sm tracking-wide">TOTAL VOLUME</h2>
           <span className="text-white/30 font-mono text-xs">// BONK.FUN × USD1</span>
+
+          {/* Source badge */}
           {data?.source && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20">
-              <Zap className="w-3 h-3 text-success" />
-              <span className="text-[10px] font-bold text-success tracking-wide uppercase">{data.source}</span>
+              <Database className="w-3 h-3 text-success" />
+              <span className="text-[10px] font-bold text-success tracking-wide uppercase">
+                {data.source}
+              </span>
             </div>
           )}
+
+          {/* Pool count */}
           {data?.poolCount && (
-            <span className="text-white/30 font-mono text-xs">{data.poolCount} pools</span>
+            <span className="text-white/30 font-mono text-xs">
+              {data.poolCount} pools
+            </span>
           )}
         </div>
 
-        {/* Period Selector */}
-        <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.06] rounded-lg p-1">
-          {PERIODS.map((p) => (
+        {/* Interval Selector */}
+        <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.06] rounded-lg p-1 overflow-x-auto">
+          {INTERVALS.map((p) => (
             <motion.button
               key={p.id}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setPeriod(p.id)}
+              onClick={() => setInterval(p.id)}
+              title={p.description}
               className={cn(
-                "px-4 py-1.5 rounded-md font-mono text-xs font-bold transition-all",
-                period === p.id
+                "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all whitespace-nowrap",
+                interval === p.id
                   ? "bg-bonk text-black"
                   : "text-white/50 hover:text-white hover:bg-white/[0.04]"
               )}
@@ -362,17 +384,24 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
 
       {/* Main Chart Card */}
       <div className="glass-card-solid p-6">
-        {/* Chart Header Stats */}
+        {/* Chart Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
-            <p className="text-white/40 text-[10px] font-mono tracking-[0.15em] uppercase mb-1">
-              TOTAL VOLUME ({period.toUpperCase()})
-            </p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-white/40 text-[10px] font-mono tracking-[0.15em] uppercase">
+                TOTAL VOLUME ({interval.toUpperCase()})
+              </p>
+              {data?.cached && (
+                <span className="text-white/20 text-[9px] font-mono">
+                  (cached)
+                </span>
+              )}
+            </div>
             <div className="flex items-baseline gap-3">
               <span className="text-3xl font-mono font-black text-white">
                 ${displayVolume > 0 ? formatCompactNumber(displayVolume) : "—"}
               </span>
-              {data && (
+              {data && data.stats.change !== 0 && (
                 <span className={cn(
                   "flex items-center gap-1 text-sm font-mono font-bold",
                   isPositive ? "text-success" : "text-danger"
@@ -389,17 +418,17 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
             <div className="flex items-center gap-4 text-xs font-mono">
               <div className="text-center">
                 <p className="text-white/30 mb-0.5">Peak</p>
-                <p className="text-white font-bold">{formatNumber(data.stats.peak)}</p>
+                <p className="text-white font-bold">${formatCompactNumber(data.stats.peak)}</p>
               </div>
               <div className="w-px h-8 bg-white/10" />
               <div className="text-center">
                 <p className="text-white/30 mb-0.5">Low</p>
-                <p className="text-white font-bold">{formatNumber(data.stats.low)}</p>
+                <p className="text-white font-bold">${formatCompactNumber(data.stats.low)}</p>
               </div>
               <div className="w-px h-8 bg-white/10" />
               <div className="text-center">
                 <p className="text-white/30 mb-0.5">Avg</p>
-                <p className="text-white font-bold">{formatNumber(data.stats.average)}</p>
+                <p className="text-white font-bold">${formatCompactNumber(data.stats.average)}</p>
               </div>
             </div>
           )}
@@ -414,76 +443,68 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
             </div>
           </div>
         ) : error ? (
-          <div className="h-56 flex items-center justify-center text-danger font-mono text-sm">
-            Failed to load volume history
+          <div className="h-56 flex flex-col items-center justify-center text-danger font-mono text-sm gap-3">
+            <span>Failed to load volume data</span>
+            <button
+              onClick={() => mutate()}
+              className="flex items-center gap-2 px-3 py-1.5 bg-danger/10 border border-danger/30 rounded-lg text-xs hover:bg-danger/20 transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Retry
+            </button>
           </div>
         ) : data && data.history.length > 0 ? (
-          <VolumeChart data={data.history} isPositive={isPositive} period={period} />
+          <VolumeChart data={data.history} interval={interval} />
         ) : (
           <div className="h-56 flex items-center justify-center text-white/30 font-mono text-sm">
-            No volume data available
-          </div>
-        )}
-
-        {/* Top Pools by Volume */}
-        {data?.topPools && data.topPools.length > 0 && (
-          <div className="mt-6 pt-6 border-t border-white/[0.04]">
-            <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-3">
-              TOP POOLS BY 24H VOLUME
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {data.topPools.map((pool, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06]"
-                >
-                  <span className="text-bonk font-mono font-bold text-sm">${pool.symbol}</span>
-                  <span className="text-white/40 font-mono text-xs">
-                    {formatNumber(pool.volume24h)}
-                  </span>
-                </div>
-              ))}
+            <div className="flex flex-col items-center gap-2">
+              <BarChart3 className="w-8 h-8 opacity-50" />
+              <span>No volume data available</span>
             </div>
           </div>
         )}
 
+        {/* Top Pools */}
+        {data?.topPools && <TopPoolsList pools={data.topPools} />}
+
         {/* Bottom Stats Grid */}
         {data && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
                 Pools
               </p>
-              <p className="text-white font-mono font-bold">{data.poolCount || data.dataPoints}</p>
+              <p className="text-white font-mono font-bold">{data.poolCount}</p>
             </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Avg/Pool
+                Data Points
+              </p>
+              <p className="text-white font-mono font-bold">{data.dataPoints}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
+                Raydium 24h
               </p>
               <p className="text-white font-mono font-bold">
-                {data.poolCount && displayVolume > 0
-                  ? formatNumber(displayVolume / data.poolCount)
-                  : "—"
-                }
+                ${formatCompactNumber(data.raydiumVolume24h)}
               </p>
             </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
                 Source
               </p>
-              <p className="text-success font-mono font-bold uppercase">
-                {data.source || "Raydium"}
+              <p className="text-success font-mono font-bold uppercase text-sm">
+                {data.source}
               </p>
             </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Status
+                Updated
               </p>
-              <p className={cn(
-                "font-mono font-bold flex items-center justify-center gap-1 text-success"
-              )}>
-                <Zap className="w-4 h-4" />
-                Live
+              <p className="text-white font-mono font-bold flex items-center justify-center gap-1">
+                <Zap className="w-3 h-3 text-success" />
+                {lastUpdatedText || "Now"}
               </p>
             </div>
           </div>

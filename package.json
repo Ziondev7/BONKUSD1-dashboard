@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint . --ext .ts,.tsx",
-    "start": "next start"
+    "start": "next start",
+    "validate-volume": "npx ts-node scripts/validate-volume.ts"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "latest",
