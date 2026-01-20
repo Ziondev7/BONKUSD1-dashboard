@@ -328,10 +328,10 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
           <Activity className="w-5 h-5 text-bonk" />
           <h2 className="font-mono font-bold text-sm tracking-wide">VOLUME</h2>
           <span className="text-white/30 font-mono text-xs">// BONK.FUN × USD1</span>
-          {data?.source === "raydium" && (
+          {data?.source && (
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20">
               <Zap className="w-3 h-3 text-success" />
-              <span className="text-[10px] font-bold text-success tracking-wide">RAYDIUM</span>
+              <span className="text-[10px] font-bold text-success tracking-wide uppercase">{data.source}</span>
             </div>
           )}
           {data?.poolCount && (
