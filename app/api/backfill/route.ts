@@ -403,9 +403,12 @@ async function fetchPoolsFromDexScreener(limit: number): Promise<Pool[]> {
 
 /**
  * Fetch ALL pools from bonkusd1.fun API (primary source - has all 600+ tokens)
+ * Only includes tokens that are:
+ * 1. Migrated (have a pairAddress on Raydium/Meteora)
+ * 2. Paired with USD1
  */
 async function fetchPoolsFromBonkUsd1Api(): Promise<Pool[]> {
-  console.log("[Backfill] Fetching ALL pools from bonkusd1.fun API...")
+  console.log("[Backfill] Fetching ALL migrated USD1 pools from bonkusd1.fun API...")
 
   try {
     const response = await fetch(BONKUSD1_API, {
@@ -419,15 +422,34 @@ async function fetchPoolsFromBonkUsd1Api(): Promise<Pool[]> {
     const data = await response.json()
     const tokens = data.tokens || []
 
-    console.log(`[Backfill] bonkusd1.fun API returned ${tokens.length} tokens`)
+    console.log(`[Backfill] bonkusd1.fun API returned ${tokens.length} total tokens`)
 
     const pools: Pool[] = []
-    for (const token of tokens) {
-      // Skip tokens without pool address
-      if (!token.pairAddress) continue
+    let skippedNoPool = 0
+    let skippedNotMigrated = 0
+    let skippedExcluded = 0
 
-      // Skip excluded tokens
+    for (const token of tokens) {
+      // Skip tokens without pool address (not migrated yet)
+      if (!token.pairAddress) {
+        skippedNoPool++
+        continue
+      }
+
+      // Skip tokens not on a DEX (not migrated) - must be on raydium or meteora
+      if (!token.dex || !['raydium', 'meteora'].includes(token.dex.toLowerCase())) {
+        skippedNotMigrated++
+        continue
+      }
+
+      // Skip excluded tokens (stablecoins, major tokens)
       if (EXCLUDED_SYMBOLS.has(token.symbol?.toUpperCase())) {
+        skippedExcluded++
+        continue
+      }
+
+      // Skip tokens with no liquidity (likely dead/rugged)
+      if (!token.liquidity || token.liquidity <= 0) {
         continue
       }
 
@@ -445,6 +467,8 @@ async function fetchPoolsFromBonkUsd1Api(): Promise<Pool[]> {
         }
       })
     }
+
+    console.log(`[Backfill] Migrated USD1 pools: ${pools.length} (skipped: ${skippedNoPool} no pool, ${skippedNotMigrated} not migrated, ${skippedExcluded} excluded)`)
 
     return pools
   } catch (error) {
