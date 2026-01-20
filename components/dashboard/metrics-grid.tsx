@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import { Activity, Droplets, Layers, TrendingUp, TrendingDown, BarChart3 } from "lucide-react"
 import { formatNumber } from "@/lib/utils"
@@ -13,6 +13,12 @@ interface MetricsGridProps {
 }
 
 export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridProps) {
+  // Prevent hydration mismatch by only rendering values after mount
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   const { marketSentiment, topMover } = useMemo(() => {
     if (tokens.length === 0) return { marketSentiment: 50, topMover: null }
     
@@ -93,16 +99,16 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
               </div>
               
               <p className="text-2xl md:text-3xl font-black font-mono text-white tracking-tight tabular-nums">
-                {isLoading ? (
+                {!mounted || isLoading ? (
                   <span className="inline-block w-24 h-8 bg-white/[0.06] rounded animate-pulse" />
                 ) : (
                   card.value
                 )}
               </p>
-              
+
               {card.subValue && (
                 <p className="text-white/30 text-xs font-mono mt-1.5 truncate">
-                  {isLoading ? (
+                  {!mounted || isLoading ? (
                     <span className="inline-block w-20 h-3 bg-white/[0.04] rounded animate-pulse" />
                   ) : (
                     card.subValue
