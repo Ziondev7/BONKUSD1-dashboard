@@ -8,8 +8,8 @@ const HELIUS_RPC_URL = HELIUS_API_KEY
   ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
   : null
 
-// USD1 token mint address
-const USD1_MINT = "E4Q4Dk1RCSoYLkfSxpC7VscUWeLWCHyjbdmByfdn6JJ8"
+// USD1 token mint address (BONK.fun stablecoin)
+const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 
 // Raydium CPMM program ID (for parsing swaps)
 const RAYDIUM_CPMM_PROGRAM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"

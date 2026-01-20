@@ -16,8 +16,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { isHeliusConfigured, fetchAllPoolHistory, aggregateSwapsToHourly } from "@/lib/helius"
 import { isSupabaseConfigured, getSupabase, upsertVolumeSnapshots, registerPool, updateSyncStatus } from "@/lib/supabase"
 
-// Constants
-const USD1_MINT = "E4Q4Dk1RCSoYLkfSxpC7VscUWeLWCHyjbdmByfdn6JJ8"
+// Constants - USD1 stablecoin (BONK.fun pairs)
+const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 
 interface Pool {
