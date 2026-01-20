@@ -61,54 +61,33 @@ const INTERVAL_CONFIG: Record<string, {
   cacheTTL: number // ms
   description: string
 }> = {
-  "5m": {
-    timeframe: "minute",
-    aggregate: 5,
-    limit: 288, // 24 hours of 5-min candles
-    cacheTTL: 60 * 1000, // 1 minute cache for short intervals
-    description: "5-minute candles for last 24 hours"
-  },
-  "15m": {
-    timeframe: "minute",
-    aggregate: 15,
-    limit: 192, // 48 hours of 15-min candles
-    cacheTTL: 2 * 60 * 1000, // 2 minutes
-    description: "15-minute candles for last 48 hours"
-  },
-  "1h": {
+  "24h": {
     timeframe: "hour",
     aggregate: 1,
-    limit: 72, // 3 days of hourly candles
+    limit: 24, // 24 hourly candles
     cacheTTL: 3 * 60 * 1000, // 3 minutes
-    description: "Hourly candles for last 3 days"
+    description: "Hourly candles for last 24 hours"
   },
-  "4h": {
+  "7d": {
     timeframe: "hour",
     aggregate: 4,
     limit: 42, // 7 days of 4-hour candles
     cacheTTL: 5 * 60 * 1000, // 5 minutes
     description: "4-hour candles for last 7 days"
   },
-  "24h": {
-    timeframe: "day",
-    aggregate: 1,
-    limit: 7, // 7 daily candles
-    cacheTTL: 10 * 60 * 1000, // 10 minutes
-    description: "Daily candles for last week"
-  },
-  "7d": {
-    timeframe: "day",
-    aggregate: 1,
-    limit: 30, // 30 daily candles
-    cacheTTL: 15 * 60 * 1000, // 15 minutes
-    description: "Daily candles for last month"
-  },
   "30d": {
     timeframe: "day",
     aggregate: 1,
-    limit: 90, // 90 daily candles
+    limit: 30, // 30 daily candles
+    cacheTTL: 10 * 60 * 1000, // 10 minutes
+    description: "Daily candles for last 30 days"
+  },
+  "all": {
+    timeframe: "day",
+    aggregate: 1,
+    limit: 180, // 6 months of daily candles
     cacheTTL: 30 * 60 * 1000, // 30 minutes
-    description: "Daily candles for last 3 months"
+    description: "Daily candles for all time"
   },
 }
 

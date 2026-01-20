@@ -58,13 +58,10 @@ interface VolumeResponse {
 // ============================================
 
 const INTERVALS = [
-  { id: "5m", label: "5M", description: "5 minute candles" },
-  { id: "15m", label: "15M", description: "15 minute candles" },
-  { id: "1h", label: "1H", description: "Hourly candles" },
-  { id: "4h", label: "4H", description: "4 hour candles" },
-  { id: "24h", label: "1D", description: "Daily candles" },
-  { id: "7d", label: "7D", description: "7 day view" },
-  { id: "30d", label: "30D", description: "30 day view" },
+  { id: "24h", label: "24H", description: "Last 24 hours" },
+  { id: "7d", label: "7D", description: "Last 7 days" },
+  { id: "30d", label: "30D", description: "Last 30 days" },
+  { id: "all", label: "ALL", description: "All time" },
 ]
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
@@ -90,17 +87,13 @@ function VolumeChart({
   const getTimeLabel = useCallback((timestamp: number): string => {
     const date = new Date(timestamp)
     switch (interval) {
-      case "5m":
-      case "15m":
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      case "1h":
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      case "4h":
-        return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit' })
       case "24h":
-        return date.toLocaleDateString([], { weekday: 'short' })
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       case "7d":
+        return date.toLocaleDateString([], { weekday: 'short' })
       case "30d":
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      case "all":
         return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
       default:
         return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
@@ -111,9 +104,7 @@ function VolumeChart({
   const getFullDate = useCallback((timestamp: number): string => {
     const date = new Date(timestamp)
     switch (interval) {
-      case "5m":
-      case "15m":
-      case "1h":
+      case "24h":
         return date.toLocaleString([], {
           weekday: 'short',
           month: 'short',
@@ -121,12 +112,11 @@ function VolumeChart({
           hour: '2-digit',
           minute: '2-digit'
         })
-      case "4h":
-        return date.toLocaleString([], {
+      case "7d":
+        return date.toLocaleDateString([], {
           weekday: 'long',
           month: 'short',
-          day: 'numeric',
-          hour: '2-digit'
+          day: 'numeric'
         })
       default:
         return date.toLocaleDateString([], {
@@ -300,7 +290,7 @@ interface VolumeEvolutionProps {
 }
 
 export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
-  const [interval, setInterval] = useState("1h")
+  const [interval, setInterval] = useState("24h")
 
   const { data, error, isLoading, mutate } = useSWR<VolumeResponse>(
     `/api/volume?interval=${interval}`,
@@ -312,8 +302,8 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
     }
   )
 
-  // Use currentVolume from props for short intervals to match metrics grid
-  const displayVolume = (interval === "5m" || interval === "15m" || interval === "1h") && currentVolume
+  // Use currentVolume from props for 24h to match metrics grid
+  const displayVolume = interval === "24h" && currentVolume
     ? currentVolume
     : (data?.stats.totalVolume || 0)
 
