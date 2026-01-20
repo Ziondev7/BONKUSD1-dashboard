@@ -480,18 +480,123 @@ async function fetchPoolsFromBonkUsd1Api(): Promise<Pool[]> {
 }
 
 /**
- * Fetch ALL pools from bonkusd1.fun API (primary and only source needed)
- * Skip DexScreener/GeckoTerminal since bonkusd1.fun already has all 600+ migrated tokens
+ * Fetch ALL pools from Raydium API with pagination (like /api/tokens does)
  */
-async function fetchPools(limit: number): Promise<Pool[]> {
-  // Use bonkusd1.fun API - it has all migrated USD1 pools
-  const pools = await fetchPoolsFromBonkUsd1Api()
+async function fetchPoolsFromRaydium(): Promise<Pool[]> {
+  console.log("[Backfill] Fetching pools from Raydium...")
+  const pools: Pool[] = []
 
-  if (pools.length === 0) {
-    throw new Error("No USD1 pools found from bonkusd1.fun API")
+  try {
+    const pageSize = 500
+    const maxPages = 5
+
+    for (let page = 1; page <= maxPages; page++) {
+      const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
+
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" }
+      })
+
+      if (!response.ok) {
+        console.log(`[Backfill] Raydium page ${page} error: ${response.status}`)
+        break
+      }
+
+      const data = await response.json()
+      if (!data.success || !data.data?.data) break
+
+      const pagePools = data.data.data
+      if (pagePools.length === 0) break
+
+      for (const pool of pagePools) {
+        const mintA = pool.mintA?.address
+        const mintB = pool.mintB?.address
+        const isAUSD1 = mintA === USD1_MINT
+        const isBUSD1 = mintB === USD1_MINT
+
+        if (!isAUSD1 && !isBUSD1) continue
+
+        const tokenMint = isAUSD1 ? mintB : mintA
+        const tokenData = isAUSD1 ? pool.mintB : pool.mintA
+
+        if (!tokenMint || tokenMint === USD1_MINT) continue
+        if (EXCLUDED_TOKENS.has(tokenMint)) continue
+        if (EXCLUDED_SYMBOLS.has(tokenData?.symbol?.toUpperCase())) continue
+
+        pools.push({
+          id: pool.id,
+          mintA: {
+            address: tokenMint,
+            symbol: tokenData?.symbol || "UNKNOWN",
+            name: tokenData?.name || tokenData?.symbol || "UNKNOWN"
+          },
+          mintB: {
+            address: USD1_MINT,
+            symbol: "USD1",
+            name: "USD1"
+          }
+        })
+      }
+
+      console.log(`[Backfill] Raydium page ${page}: ${pagePools.length} pools (total: ${pools.length})`)
+
+      if (pagePools.length < pageSize) break
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+  } catch (error) {
+    console.log(`[Backfill] Raydium error: ${error instanceof Error ? error.message : 'Unknown'}`)
   }
 
-  console.log(`[Backfill] Total pools to process: ${pools.length}`)
+  return pools
+}
+
+/**
+ * Fetch ALL pools from multiple sources and combine them (like /api/tokens does)
+ */
+async function fetchPools(limit: number): Promise<Pool[]> {
+  const allPools = new Map<string, Pool>()
+
+  // Fetch from all sources in parallel
+  console.log("[Backfill] Fetching from all sources in parallel...")
+
+  const [raydiumPools, dexScreenerPools, geckoTerminalPools] = await Promise.all([
+    fetchPoolsFromRaydium(),
+    fetchPoolsFromDexScreener(9999),
+    fetchPoolsFromGeckoTerminal(9999)
+  ])
+
+  // Add Raydium pools
+  for (const pool of raydiumPools) {
+    allPools.set(pool.id, pool)
+  }
+  console.log(`[Backfill] Raydium: ${raydiumPools.length} pools`)
+
+  // Add DexScreener pools (dedup by pool address)
+  let newFromDex = 0
+  for (const pool of dexScreenerPools) {
+    if (!allPools.has(pool.id)) {
+      allPools.set(pool.id, pool)
+      newFromDex++
+    }
+  }
+  console.log(`[Backfill] DexScreener: ${dexScreenerPools.length} pools (${newFromDex} new)`)
+
+  // Add GeckoTerminal pools (dedup by pool address)
+  let newFromGecko = 0
+  for (const pool of geckoTerminalPools) {
+    if (!allPools.has(pool.id)) {
+      allPools.set(pool.id, pool)
+      newFromGecko++
+    }
+  }
+  console.log(`[Backfill] GeckoTerminal: ${geckoTerminalPools.length} pools (${newFromGecko} new)`)
+
+  const pools = Array.from(allPools.values())
+  console.log(`[Backfill] Total unique pools: ${pools.length}`)
+
+  if (pools.length === 0) {
+    throw new Error("No USD1 pools found from any source")
+  }
 
   // Apply limit if specified (0 means no limit)
   return limit > 0 ? pools.slice(0, limit) : pools
