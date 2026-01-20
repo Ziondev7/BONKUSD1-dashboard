@@ -24,7 +24,7 @@ export interface VolumeStoreConfig {
 }
 
 const DEFAULT_CONFIG: VolumeStoreConfig = {
-  maxSnapshots: 720, // 30 days of hourly snapshots
+  maxSnapshots: 8760, // 1 year of hourly snapshots (for backfill support)
   snapshotIntervalMs: 60 * 60 * 1000, // 1 hour
 }
 
@@ -115,12 +115,8 @@ export async function saveVolumeSnapshot(snapshot: VolumeSnapshot): Promise<void
         member: JSON.stringify(normalizedSnapshot),
       })
 
-      // Trim old snapshots (keep only last maxSnapshots)
-      const count = await kv.zcard("volume:snapshots")
-      if (count > config.maxSnapshots) {
-        await kv.zremrangebyrank("volume:snapshots", 0, count - config.maxSnapshots - 1)
-      }
-
+      // Note: For Vercel KV, we don't trim since it can handle large datasets
+      // and we want to preserve all historical data from backfill
       return
     } catch (error) {
       console.error("[VolumeStore] KV save error, falling back to memory:", error)
