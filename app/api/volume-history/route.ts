@@ -639,7 +639,26 @@ export async function GET(request: Request) {
   if (USE_DATABASE && isSupabaseConfigured() && !forceRefresh) {
     console.log(`[Volume] Checking Supabase for ${period} data...`)
 
-    const dbResult = await getAggregatedVolume(period as '24h' | '7d' | '1m' | 'all')
+    // For 24H, if database doesn't have recent data, use 7D data filtered to last 24h
+    let dbResult = await getAggregatedVolume(period as '24h' | '7d' | '1m' | 'all')
+
+    // If 24H is empty but we have historical data, use 7D and filter
+    if (period === '24h' && (!dbResult || dbResult.history.length === 0)) {
+      console.log(`[Volume] 24H empty, checking 7D data...`)
+      const sevenDayResult = await getAggregatedVolume('7d')
+      if (sevenDayResult && sevenDayResult.history.length > 0) {
+        // Filter to last 24 hours
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000
+        const filtered = sevenDayResult.history.filter(h => h.timestamp >= cutoff)
+        if (filtered.length > 0) {
+          dbResult = {
+            history: filtered,
+            total: filtered.reduce((sum, h) => sum + h.volume, 0),
+            poolCount: sevenDayResult.poolCount
+          }
+        }
+      }
+    }
 
     if (dbResult && dbResult.history.length > 0) {
       console.log(`[Volume] Using Supabase data: ${dbResult.history.length} points, $${dbResult.total.toLocaleString()} total`)
@@ -664,7 +683,7 @@ export async function GET(request: Request) {
       })
     }
 
-    console.log(`[Volume] Supabase empty, falling back to API...`)
+    console.log(`[Volume] Supabase empty for all periods, falling back to API...`)
   }
 
   // ============================================
