@@ -34,11 +34,14 @@ interface VolumeHistoryResponse {
     low: number
     average: number
     totalVolume: number
+    poolCount?: number
   }
   period: string
   dataPoints: number
   cached?: boolean
   synthetic?: boolean
+  poolCount?: number
+  ohlcvCoverage?: number // Percentage of volume covered by real OHLCV data
 }
 
 const PERIODS = [
@@ -325,10 +328,28 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
           <Activity className="w-5 h-5 text-bonk" />
           <h2 className="font-mono font-bold text-sm tracking-wide">VOLUME EVOLUTION</h2>
           <span className="text-white/30 font-mono text-xs">// USD1 PAIRS</span>
-          {data?.synthetic && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-bonk/10 border border-bonk/20" title="Historical data unavailable - showing estimates based on typical trading patterns">
+          {/* Data quality indicators */}
+          {data?.synthetic ? (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-bonk/10 border border-bonk/20" title="Historical OHLCV unavailable - showing distribution based on actual 24h volume from all pools">
               <AlertTriangle className="w-3 h-3 text-bonk" />
-              <span className="text-[10px] font-bold text-bonk tracking-wide">ESTIMATED DATA</span>
+              <span className="text-[10px] font-bold text-bonk tracking-wide">ESTIMATED DISTRIBUTION</span>
+            </div>
+          ) : data?.ohlcvCoverage && data.ohlcvCoverage > 0 ? (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20"
+              title={`Real OHLCV data from top ${data.poolCount || 0} pools covering ${data.ohlcvCoverage.toFixed(0)}% of total volume`}
+            >
+              <Activity className="w-3 h-3 text-success" />
+              <span className="text-[10px] font-bold text-success tracking-wide">
+                {data.ohlcvCoverage >= 80 ? "LIVE DATA" : `${data.ohlcvCoverage.toFixed(0)}% COVERAGE`}
+              </span>
+            </div>
+          ) : null}
+
+          {/* Pool count badge */}
+          {data?.poolCount && data.poolCount > 0 && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 border border-white/10" title="Number of active BONK.fun/USD1 pools">
+              <span className="text-[10px] font-mono text-white/50">{data.poolCount} pools</span>
             </div>
           )}
         </div>
@@ -421,7 +442,13 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
 
         {/* Bottom Stats Grid */}
         {data && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
+            <div className="text-center">
+              <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
+                Active Pools
+              </p>
+              <p className="text-white font-mono font-bold">{data.poolCount || data.dataPoints}</p>
+            </div>
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
                 Data Points
@@ -433,7 +460,7 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
                 Period Start
               </p>
               <p className="text-white font-mono font-bold">
-                {data.history.length > 0 
+                {data.history.length > 0
                   ? new Date(data.history[0].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   : "—"
                 }
@@ -444,7 +471,7 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
                 Latest Update
               </p>
               <p className="text-white font-mono font-bold">
-                {data.history.length > 0 
+                {data.history.length > 0
                   ? new Date(data.history[data.history.length - 1].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   : "—"
                 }
