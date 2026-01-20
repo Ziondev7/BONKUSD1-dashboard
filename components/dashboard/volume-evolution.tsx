@@ -53,21 +53,31 @@ const PERIODS = [
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
-// Yellow candlestick bar chart component
-function VolumeChart({ 
-  data, 
+// Yellow candlestick bar chart component with enhanced interactions
+function VolumeChart({
+  data,
   isPositive,
-  period 
-}: { 
+  period
+}: {
   data: VolumeDataPoint[]
-  isPositive: boolean 
+  isPositive: boolean
   period: string
 }) {
   const [hoveredBar, setHoveredBar] = useState<{ index: number; x: number; y: number } | null>(null)
-  
+  const [isTouching, setIsTouching] = useState(false)
+
   const volumes = data.map(d => d.volume)
   const max = Math.max(...volumes) * 1.1
   const min = 0
+
+  // Calculate volume change from previous bar for tooltip
+  const getVolumeChange = (index: number): number | null => {
+    if (index === 0) return null
+    const current = data[index].volume
+    const previous = data[index - 1].volume
+    if (previous === 0) return null
+    return ((current - previous) / previous) * 100
+  }
 
   // Format time label based on period
   const formatTimeLabel = (timestamp: number): string => {
@@ -147,14 +157,45 @@ function VolumeChart({
   const barWidth = Math.max(2, Math.min(12, (100 / data.length) * 0.7))
   const gap = Math.max(1, (100 / data.length) * 0.3)
 
+  // Handle touch events for mobile
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isTouching) return
+    const touch = e.touches[0]
+    const container = e.currentTarget as HTMLElement
+    const rect = container.getBoundingClientRect()
+    const x = touch.clientX - rect.left
+    const barIndex = Math.floor((x / rect.width) * data.length)
+    if (barIndex >= 0 && barIndex < data.length) {
+      setHoveredBar({ index: barIndex, x: touch.clientX, y: touch.clientY })
+    }
+  }
+
   return (
-    <div className="relative h-56">
+    <div
+      className="relative h-56 select-none"
+      onTouchStart={() => setIsTouching(true)}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={() => {
+        setIsTouching(false)
+        setHoveredBar(null)
+      }}
+    >
+      {/* Crosshair line when hovering */}
+      {hoveredBar !== null && (
+        <div
+          className="absolute top-0 bottom-8 w-px bg-bonk/40 pointer-events-none z-10"
+          style={{
+            left: `${(hoveredBar.index / data.length) * 100 + (50 / data.length)}%`,
+          }}
+        />
+      )}
+
       {/* Chart container */}
       <div className="absolute inset-0 flex items-end justify-between px-1 pb-8">
         {data.map((d, i) => {
           const heightPercent = max > 0 ? ((d.volume - min) / (max - min)) * 100 : 0
           const isHovered = hoveredBar?.index === i
-          
+
           return (
             <div
               key={i}
@@ -162,13 +203,13 @@ function VolumeChart({
               style={{ width: `${barWidth}%` }}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect()
-                setHoveredBar({ 
-                  index: i, 
+                setHoveredBar({
+                  index: i,
                   x: rect.left + rect.width / 2,
                   y: rect.top
                 })
               }}
-              onMouseLeave={() => setHoveredBar(null)}
+              onMouseLeave={() => !isTouching && setHoveredBar(null)}
             >
               {/* The candle/bar */}
               <motion.div
@@ -177,8 +218,8 @@ function VolumeChart({
                 transition={{ duration: 0.5, delay: i * 0.01 }}
                 className={cn(
                   "w-full rounded-t-sm cursor-pointer transition-all duration-150",
-                  isHovered 
-                    ? "bg-bonk shadow-[0_0_15px_rgba(250,204,21,0.6)]" 
+                  isHovered
+                    ? "bg-bonk shadow-[0_0_15px_rgba(250,204,21,0.6)]"
                     : "bg-bonk/70 hover:bg-bonk"
                 )}
                 style={{
@@ -218,30 +259,56 @@ function VolumeChart({
         ))}
       </div>
 
-      {/* Tooltip */}
+      {/* Enhanced Tooltip */}
       <AnimatePresence>
         {hoveredBar !== null && data[hoveredBar.index] && (
           <motion.div
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 5 }}
+            initial={{ opacity: 0, y: 5, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 5, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
             className="absolute z-50 pointer-events-none"
             style={{
-              left: `${(hoveredBar.index / data.length) * 100}%`,
+              left: `${Math.min(Math.max((hoveredBar.index / data.length) * 100, 15), 85)}%`,
               bottom: '100%',
               transform: 'translateX(-50%)',
-              marginBottom: '8px'
+              marginBottom: '12px'
             }}
           >
-            <div className="bg-[#0a0a0c] border border-bonk/30 rounded-lg px-3 py-2 shadow-[0_0_20px_rgba(250,204,21,0.2)]">
-              <p className="text-bonk font-mono text-xs font-bold mb-1">
+            <div className="bg-[#0a0a0c]/95 backdrop-blur-sm border border-bonk/30 rounded-lg px-3 py-2.5 shadow-[0_0_30px_rgba(250,204,21,0.25)] min-w-[140px]">
+              {/* Time */}
+              <p className="text-bonk font-mono text-[10px] font-bold mb-1.5 tracking-wide">
                 {getFullDateLabel(data[hoveredBar.index].timestamp)}
               </p>
-              <p className="text-white font-mono text-sm font-bold">
-                ${formatNumber(data[hoveredBar.index].volume)}
-              </p>
+
+              {/* Volume */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-white/50 text-[10px] font-mono">Volume</span>
+                <span className="text-white font-mono text-sm font-bold">
+                  ${formatNumber(data[hoveredBar.index].volume)}
+                </span>
+              </div>
+
+              {/* Change from previous */}
+              {(() => {
+                const change = getVolumeChange(hoveredBar.index)
+                if (change === null) return null
+                return (
+                  <div className="flex items-center justify-between gap-3 mt-1 pt-1 border-t border-white/10">
+                    <span className="text-white/50 text-[10px] font-mono">vs Prev</span>
+                    <span className={cn(
+                      "font-mono text-xs font-bold flex items-center gap-0.5",
+                      change >= 0 ? "text-success" : "text-danger"
+                    )}>
+                      {change >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                      {Math.abs(change).toFixed(1)}%
+                    </span>
+                  </div>
+                )
+              })()}
+
               {/* Arrow */}
-              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent border-t-bonk/30" />
+              <div className="absolute left-1/2 -translate-x-1/2 -bottom-2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[8px] border-transparent border-t-bonk/30" />
             </div>
           </motion.div>
         )}

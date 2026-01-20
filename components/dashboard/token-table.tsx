@@ -24,6 +24,8 @@ import {
 import Image from "next/image"
 import type { Token } from "@/lib/types"
 import { formatNumber, formatPrice, formatAge, isNewToken, cn, getSafetyWarningExplanation } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { TokenCardGrid } from "./token-cards"
 
 interface TokenTableProps {
   tokens: Token[]
@@ -239,6 +241,7 @@ export function TokenTable({
   onOpenTradeModal,
   isLoading = false,
 }: TokenTableProps) {
+  const isMobile = useIsMobile()
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
 
   const volumeThreshold = useMemo(() => {
@@ -296,6 +299,66 @@ export function TokenTable({
     </th>
   )
 
+  // Mobile view - render card grid
+  if (isMobile) {
+    return (
+      <div className="space-y-4">
+        {/* Mobile Header */}
+        <div className="flex items-center justify-between px-1">
+          <h3 className="font-mono font-bold text-sm text-white">
+            {totalTokens} TOKENS
+          </h3>
+          {totalPages > 1 && (
+            <span className="text-white/30 text-xs font-mono">
+              Page {currentPage} of {totalPages}
+            </span>
+          )}
+        </div>
+
+        {/* Card Grid */}
+        <TokenCardGrid
+          tokens={tokens}
+          currentPage={currentPage}
+          favorites={favorites}
+          onToggleFavorite={onToggleFavorite}
+          onSelectToken={onSelectToken}
+          onOpenTradeModal={onOpenTradeModal}
+          isLoading={isLoading}
+        />
+
+        {/* Mobile Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-3 pt-4">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => onPageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="flex items-center gap-1 px-4 py-2.5 font-mono text-xs rounded-lg bg-white/[0.05] border border-white/[0.08] active:bg-white/[0.1] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              PREV
+            </motion.button>
+
+            <span className="font-mono text-sm text-white/60 min-w-[80px] text-center">
+              {currentPage} / {totalPages}
+            </span>
+
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => onPageChange(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="flex items-center gap-1 px-4 py-2.5 font-mono text-xs rounded-lg bg-white/[0.05] border border-white/[0.08] active:bg-white/[0.1] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              NEXT
+              <ChevronRight className="w-4 h-4" />
+            </motion.button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Desktop view - render table
   return (
     <div className="glass-card-solid overflow-hidden">
       {/* Table Header Summary */}
@@ -310,7 +373,7 @@ export function TokenTable({
             </span>
           )}
         </div>
-        
+
         <div className="flex items-center gap-3 text-xs font-mono text-white/40">
           <div className="flex items-center gap-1">
             <ShieldCheck className="w-3 h-3 text-success" />
