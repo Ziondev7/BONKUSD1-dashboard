@@ -455,6 +455,7 @@ export async function getDailyVolume(
 
 /**
  * Get all daily volume data (for charting)
+ * Uses batch fetching for performance
  */
 export async function getAllDailyVolume(): Promise<DailyVolumeData[]> {
   const kv = await getKV()
@@ -467,15 +468,29 @@ export async function getAllDailyVolume(): Promise<DailyVolumeData[]> {
 
       const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
 
-      // Fetch all records
+      if (dates.length === 0) return []
+
+      // Batch fetch all records in parallel (much faster than sequential)
+      const keys = dates.map(date => `${DAILY_VOLUME_KEY}:${date}`)
+
+      // Fetch in batches of 50 to avoid overwhelming the API
+      const BATCH_SIZE = 50
       const results: DailyVolumeData[] = []
-      for (const date of dates) {
-        const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${date}`)
-        if (dataJson) {
-          const data = typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson
-          results.push(data as DailyVolumeData)
+
+      for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+        const batchKeys = keys.slice(i, i + BATCH_SIZE)
+        const batchPromises = batchKeys.map(key => kv.get(key))
+        const batchResults = await Promise.all(batchPromises)
+
+        for (const dataJson of batchResults) {
+          if (dataJson) {
+            const data = typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson
+            results.push(data as DailyVolumeData)
+          }
         }
       }
+
+      console.log(`[VolumeStore] Fetched ${results.length} daily records in parallel batches`)
       return results.sort((a, b) => a.timestamp - b.timestamp)
     } catch (error) {
       console.error("[VolumeStore] KV error fetching all daily volume:", error)

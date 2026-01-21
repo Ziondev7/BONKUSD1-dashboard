@@ -304,6 +304,7 @@ async function fetchDuneVolumeHistory(): Promise<DuneVolumeRow[] | null> {
 
 /**
  * Convert Dune data to VolumeDataPoint format
+ * Aggregates to weekly candles for ALL period when data > 14 days
  */
 function convertDuneToVolumeData(
   duneRows: DuneVolumeRow[],
@@ -340,13 +341,19 @@ function convertDuneToVolumeData(
     .filter(row => row.timestamp >= cutoffTime && row.timestamp <= now)
     .sort((a, b) => a.timestamp - b.timestamp)
 
-  const data: VolumeDataPoint[] = filteredRows.map(row => ({
+  let data: VolumeDataPoint[] = filteredRows.map(row => ({
     timestamp: row.timestamp,
     volume: Math.round(row.volume),
     trades: row.trades,
     poolCount: row.uniqueTokens,
     isOhlcv: true, // Dune data is real on-chain data
   }))
+
+  // For ALL period with more than 14 days, aggregate to weekly candles
+  if (period === "all" && data.length > 14) {
+    data = aggregateToWeekly(data)
+    console.log(`[Volume] Dune returned ${filteredRows.length} days, aggregated to ${data.length} weekly candles`)
+  }
 
   const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
   const uniqueTokens = Math.max(...filteredRows.map(r => r.uniqueTokens), 0)
@@ -709,8 +716,8 @@ async function fetchKVVolumeHistory(period: string): Promise<{
       isOhlcv: true, // KV data is accurate historical data
     }))
 
-    // For ALL period, aggregate to weekly candles
-    if (period === "all" && data.length > 30) {
+    // For ALL period, aggregate to weekly candles when we have more than 14 days
+    if (period === "all" && data.length > 14) {
       data = aggregateToWeekly(data)
       console.log(`[Volume] KV returned ${filteredData.length} days, aggregated to ${data.length} weekly candles`)
     } else {
@@ -784,10 +791,16 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   // ========================================
   const kvData = await fetchKVVolumeHistory(period)
 
-  // For 24h period, we need hourly data - KV only has daily, so skip to OHLCV fallback
-  const minDataPointsFor24h = 6 // Need at least 6 hourly points for a decent 24h chart
+  // Minimum data points required per period for a meaningful chart
+  const minDataPoints: Record<string, number> = {
+    "24h": 6,   // Need hourly data, KV has daily - skip to OHLCV
+    "7d": 3,    // At least 3 days
+    "1m": 7,    // At least a week of data
+    "all": 14,  // Need at least 2 weeks for ALL to show meaningful weekly candles
+  }
+  const minRequired = minDataPoints[period] || 3
 
-  if (kvData && kvData.data.length > 0 && (period !== "24h" || kvData.data.length >= minDataPointsFor24h)) {
+  if (kvData && kvData.data.length >= minRequired) {
     // Get today's live volume from Raydium
     const todayLive = await fetchTodayLiveVolume()
 
