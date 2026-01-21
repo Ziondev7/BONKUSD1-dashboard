@@ -8,10 +8,14 @@ const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 const DUNE_API = "https://api.dune.com/api/v1"
-const DUNE_QUERY_ID = "6572422" // USD1 Daily Volume query
+const DUNE_QUERY_ID = "6572422" // USD1 Daily Volume query - needs per-pool data
 
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
+
+// Known BONK.fun pool addresses cache (to avoid fetching from Raydium every time)
+let bonkfunPoolsCache: { pools: Set<string>; timestamp: number } | null = null
+const POOLS_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for pool addresses
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
@@ -39,6 +43,16 @@ interface DuneVolumeData {
   date: string
   trade_count: number
   daily_volume_usd: number
+  pool_address?: string // Pool address for filtering by BONK.fun pools
+}
+
+interface DuneRawRow {
+  date: string
+  trade_count: number
+  daily_volume_usd: number
+  pool_address?: string
+  token_mint?: string
+  token_symbol?: string
 }
 
 interface PoolVolumeData {
@@ -96,10 +110,48 @@ function shouldExclude(symbol?: string): boolean {
 // ============================================
 
 /**
- * Fetch historical USD1 volume data from Dune Analytics
- * Returns daily volume data from the saved query
+ * Get cached BONK.fun pool addresses or fetch from Raydium
  */
-async function fetchDuneHistoricalVolume(): Promise<DuneVolumeData[]> {
+async function getBonkfunPoolAddresses(): Promise<Set<string>> {
+  // Check cache first
+  if (bonkfunPoolsCache && Date.now() - bonkfunPoolsCache.timestamp < POOLS_CACHE_TTL) {
+    console.log(`[Pools] Using cached BONK.fun pools (${bonkfunPoolsCache.pools.size} pools)`)
+    return bonkfunPoolsCache.pools
+  }
+
+  // Fetch fresh pool list from Raydium
+  const { pools } = await fetchAllRaydiumUSD1Pools()
+  const poolAddresses = new Set(pools.map(p => p.poolId.toLowerCase()))
+
+  // Update cache
+  bonkfunPoolsCache = { pools: poolAddresses, timestamp: Date.now() }
+  console.log(`[Pools] Cached ${poolAddresses.size} BONK.fun pool addresses`)
+
+  return poolAddresses
+}
+
+/**
+ * Fetch historical USD1 volume data from Dune Analytics
+ * Filters data to only include BONK.fun launched tokens
+ *
+ * IMPORTANT: Your Dune query needs to return per-pool data. Use this SQL:
+ *
+ * SELECT
+ *   date_trunc('day', block_time) AS date,
+ *   project_contract_address AS pool_address,
+ *   COUNT(*) AS trade_count,
+ *   SUM(amount_usd) AS daily_volume_usd
+ * FROM dex_solana.trades
+ * WHERE
+ *   project = 'raydium'
+ *   AND (
+ *     token_bought_mint_address = 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB'
+ *     OR token_sold_mint_address = 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB'
+ *   )
+ * GROUP BY 1, 2
+ * ORDER BY 1, 2
+ */
+async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<DuneVolumeData[]> {
   const duneApiKey = process.env.DUNE_API_KEY
 
   if (!duneApiKey) {
@@ -109,14 +161,14 @@ async function fetchDuneHistoricalVolume(): Promise<DuneVolumeData[]> {
 
   // Check cache first
   if (duneDataCache && Date.now() - duneDataCache.timestamp < DUNE_CACHE_TTL) {
-    console.log(`[Dune] Using cached data (${duneDataCache.data.length} days)`)
+    console.log(`[Dune] Using cached data (${duneDataCache.data.length} entries)`)
     return duneDataCache.data
   }
 
   try {
     console.log("[Dune] Fetching historical volume data...")
     const response = await fetch(
-      `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=1000`,
+      `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=10000`,
       {
         headers: {
           "x-dune-api-key": duneApiKey,
@@ -130,18 +182,55 @@ async function fetchDuneHistoricalVolume(): Promise<DuneVolumeData[]> {
     }
 
     const json = await response.json()
-    const rows = json.result?.rows || []
+    const rows: DuneRawRow[] = json.result?.rows || []
 
-    // Transform to our format
-    const data: DuneVolumeData[] = rows.map((row: any) => ({
-      date: row.date,
-      trade_count: Number(row.trade_count) || 0,
-      daily_volume_usd: Number(row.daily_volume_usd) || 0,
-    }))
+    console.log(`[Dune] Raw data: ${rows.length} rows`)
+
+    // Check if data has pool_address field (per-pool query)
+    const hasPoolData = rows.length > 0 && rows[0].pool_address
+
+    let data: DuneVolumeData[]
+
+    if (hasPoolData && bonkfunPools && bonkfunPools.size > 0) {
+      // Filter by BONK.fun pool addresses and aggregate by date
+      console.log(`[Dune] Filtering by ${bonkfunPools.size} BONK.fun pools...`)
+
+      const dateAggregates = new Map<string, { volume: number; trades: number }>()
+
+      rows.forEach((row) => {
+        const poolAddr = (row.pool_address || "").toLowerCase()
+
+        // Only include pools that are in our BONK.fun pool list
+        if (bonkfunPools.has(poolAddr)) {
+          const existing = dateAggregates.get(row.date) || { volume: 0, trades: 0 }
+          existing.volume += Number(row.daily_volume_usd) || 0
+          existing.trades += Number(row.trade_count) || 0
+          dateAggregates.set(row.date, existing)
+        }
+      })
+
+      data = Array.from(dateAggregates.entries()).map(([date, agg]) => ({
+        date,
+        trade_count: agg.trades,
+        daily_volume_usd: agg.volume,
+      }))
+
+      console.log(`[Dune] After filtering: ${data.length} days of BONK.fun volume`)
+    } else {
+      // No pool filtering available - use data as-is (aggregated format)
+      // This fallback handles the old query format
+      console.log("[Dune] Using aggregated data (no pool filtering available)")
+
+      data = rows.map((row) => ({
+        date: row.date,
+        trade_count: Number(row.trade_count) || 0,
+        daily_volume_usd: Number(row.daily_volume_usd) || 0,
+      }))
+    }
 
     // Update cache
     duneDataCache = { data, timestamp: Date.now() }
-    console.log(`[Dune] Fetched ${data.length} days of historical data`)
+    console.log(`[Dune] Cached ${data.length} days of historical data`)
 
     return data
   } catch (error) {
@@ -556,7 +645,11 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 
   // Step 3: For 7d/1m/all, use Dune Analytics for accurate historical data
   if (period !== "24h") {
-    const duneData = await fetchDuneHistoricalVolume()
+    // Get BONK.fun pool addresses to filter Dune data
+    const bonkfunPoolAddresses = new Set(pools.map(p => p.poolId.toLowerCase()))
+    console.log(`[Volume] Will filter Dune data by ${bonkfunPoolAddresses.size} BONK.fun pools`)
+
+    const duneData = await fetchDuneHistoricalVolume(bonkfunPoolAddresses)
 
     if (duneData.length > 0) {
       const { data: volumePoints, totalVolume } = duneDataToVolumePoints(duneData, cutoffTime, period)
@@ -569,7 +662,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
           totalVolume24h,
           totalVolumePeriod: totalVolume,
           poolCount: pools.length,
-          ohlcvCoverage: 100, // Dune has full coverage
+          ohlcvCoverage: 100, // Dune has full coverage for BONK.fun pools
           dataSource: "dune",
         }
       }
