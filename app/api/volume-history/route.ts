@@ -6,12 +6,15 @@ import { NextResponse } from "next/server"
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
+const DUNE_API_BASE = "https://api.dune.com/api/v1"
+const DUNE_API_KEY = process.env.DUNE_API_KEY
 
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
+const DUNE_CACHE_TTL = 10 * 60 * 1000 // 10 minutes cache for Dune data (queries are slower)
 const OHLCV_BATCH_SIZE = 5 // Fetch OHLCV for top 5 pools per batch (rate limit friendly)
 const MAX_OHLCV_POOLS = 30 // Maximum pools to fetch OHLCV from
 
@@ -49,6 +52,7 @@ interface CacheEntry {
   totalVolume24h: number
   poolCount: number
   ohlcvCoverage: number // Percentage of volume covered by real OHLCV
+  source?: string // "dune", "geckoterminal", or "synthetic"
 }
 
 // ============================================
@@ -91,6 +95,160 @@ function shouldExclude(symbol?: string): boolean {
   if (!symbol) return false
   const s = symbol.toUpperCase()
   return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
+}
+
+// ============================================
+// DUNE ANALYTICS INTEGRATION
+// ============================================
+
+interface DuneResultResponse {
+  execution_id: string
+  state: string
+  result?: {
+    rows: any[]
+    metadata: {
+      column_names: string[]
+      result_set_bytes: number
+      total_row_count: number
+    }
+  }
+}
+
+/**
+ * Build SQL query for USD1 volume history from Dune
+ */
+function buildDuneVolumeSQL(period: string): string {
+  let interval: string
+  let lookback: string
+
+  switch (period) {
+    case "24h":
+      interval = "hour"
+      lookback = "24 hours"
+      break
+    case "7d":
+      interval = "hour"
+      lookback = "7 days"
+      break
+    case "1m":
+      interval = "day"
+      lookback = "30 days"
+      break
+    case "all":
+      interval = "week"
+      lookback = "180 days"
+      break
+    default:
+      interval = "hour"
+      lookback = "24 hours"
+  }
+
+  // Query for Raydium DEX trades involving USD1
+  return `
+    SELECT
+      date_trunc('${interval}', block_time) as time_bucket,
+      SUM(amount_usd) as volume,
+      COUNT(*) as trades
+    FROM dex_solana.trades
+    WHERE
+      block_time >= NOW() - INTERVAL '${lookback}'
+      AND (
+        token_bought_mint_address = '${USD1_MINT}'
+        OR token_sold_mint_address = '${USD1_MINT}'
+      )
+      AND project = 'raydium'
+    GROUP BY 1
+    ORDER BY 1 ASC
+  `
+}
+
+/**
+ * Fetch volume history from Dune Analytics
+ * Returns null if Dune is not configured or fails
+ */
+async function fetchDuneVolumeHistory(period: string): Promise<{
+  data: VolumeDataPoint[]
+  totalVolume: number
+} | null> {
+  if (!DUNE_API_KEY) {
+    console.log("[Volume] Dune API key not configured, skipping Dune")
+    return null
+  }
+
+  try {
+    console.log(`[Volume] Fetching from Dune Analytics for period: ${period}`)
+
+    const sql = buildDuneVolumeSQL(period)
+
+    // Execute the query
+    const executeResponse = await fetch(`${DUNE_API_BASE}/query/execute`, {
+      method: "POST",
+      headers: {
+        "X-Dune-API-Key": DUNE_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query_sql: sql,
+        is_private: false,
+      }),
+    })
+
+    if (!executeResponse.ok) {
+      console.error("[Volume] Dune execute error:", executeResponse.status)
+      return null
+    }
+
+    const executeData = await executeResponse.json()
+    const executionId = executeData.execution_id
+
+    // Poll for results (max 90 seconds)
+    const maxWaitTime = 90000
+    const pollInterval = 3000
+    let elapsed = 0
+
+    while (elapsed < maxWaitTime) {
+      const statusResponse = await fetch(`${DUNE_API_BASE}/execution/${executionId}/results`, {
+        headers: {
+          "X-Dune-API-Key": DUNE_API_KEY,
+        },
+      })
+
+      if (statusResponse.ok) {
+        const statusData: DuneResultResponse = await statusResponse.json()
+
+        if (statusData.state === "QUERY_STATE_COMPLETED" && statusData.result) {
+          const rows = statusData.result.rows
+
+          // Transform to our format
+          const data: VolumeDataPoint[] = rows.map(row => ({
+            timestamp: new Date(row.time_bucket).getTime(),
+            volume: parseFloat(row.volume) || 0,
+            trades: parseInt(row.trades) || 0,
+            isOhlcv: true, // Real data from Dune
+          }))
+
+          const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
+
+          console.log(`[Volume] Dune returned ${data.length} data points, total volume: $${totalVolume.toLocaleString()}`)
+          return { data, totalVolume }
+        }
+
+        if (statusData.state === "QUERY_STATE_FAILED") {
+          console.error("[Volume] Dune query failed")
+          return null
+        }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
+      elapsed += pollInterval
+    }
+
+    console.error("[Volume] Dune query timeout")
+    return null
+  } catch (error) {
+    console.error("[Volume] Dune error:", error)
+    return null
+  }
 }
 
 // ============================================
@@ -340,10 +498,30 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   totalVolume24h: number
   poolCount: number
   ohlcvCoverage: number
+  source?: string
 }> {
   console.log(`[Volume] Fetching BONK.fun/USD1 volume data for period: ${period}`)
 
-  // Step 1: Get ALL pools from Raydium
+  // Step 0: Try Dune Analytics first (real on-chain data)
+  if (DUNE_API_KEY) {
+    const duneResult = await fetchDuneVolumeHistory(period)
+    if (duneResult && duneResult.data.length > 0) {
+      // Get pool count from Raydium for display
+      const { pools, totalVolume24h: raydiumVolume24h } = await fetchAllRaydiumUSD1Pools()
+
+      return {
+        data: duneResult.data,
+        synthetic: false,
+        totalVolume24h: period === "24h" ? raydiumVolume24h : duneResult.totalVolume,
+        poolCount: pools.length,
+        ohlcvCoverage: 100, // Dune covers all trades
+        source: "dune",
+      }
+    }
+    console.log("[Volume] Dune failed or returned no data, falling back to Raydium/GeckoTerminal")
+  }
+
+  // Step 1: Get ALL pools from Raydium (fallback)
   const { pools, totalVolume24h, totalLiquidity } = await fetchAllRaydiumUSD1Pools()
 
   if (pools.length === 0 || totalVolume24h === 0) {
@@ -632,9 +810,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const period = url.searchParams.get("period") || "24h"
 
-  // Check cache
+  // Check cache (use longer TTL for Dune data)
   const cached = volumeCache.get(period)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  const cacheTtl = cached?.source === "dune" ? DUNE_CACHE_TTL : CACHE_TTL
+  if (cached && Date.now() - cached.timestamp < cacheTtl) {
     return NextResponse.json({
       history: cached.data,
       stats: calculateStats(cached.data, cached.totalVolume24h, cached.poolCount, period),
@@ -644,6 +823,7 @@ export async function GET(request: Request) {
       synthetic: cached.synthetic,
       poolCount: cached.poolCount,
       ohlcvCoverage: cached.ohlcvCoverage,
+      source: cached.source || (cached.synthetic ? "synthetic" : "geckoterminal"),
     })
   }
 
@@ -654,7 +834,11 @@ export async function GET(request: Request) {
     totalVolume24h,
     poolCount,
     ohlcvCoverage,
+    source,
   } = await fetchBonkFunVolumeHistory(period)
+
+  // Determine source label
+  const dataSource = source || (synthetic ? "synthetic" : "geckoterminal")
 
   // Update cache
   volumeCache.set(period, {
@@ -665,6 +849,7 @@ export async function GET(request: Request) {
     totalVolume24h,
     poolCount,
     ohlcvCoverage,
+    source: dataSource,
   })
 
   return NextResponse.json({
@@ -676,6 +861,7 @@ export async function GET(request: Request) {
     synthetic,
     poolCount,
     ohlcvCoverage,
+    source: dataSource,
   })
 }
 
