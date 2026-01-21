@@ -42,7 +42,7 @@ interface VolumeHistoryResponse {
   synthetic?: boolean
   poolCount?: number
   ohlcvCoverage?: number // Percentage of volume covered by real OHLCV data
-  dataSource?: "ohlcv" | "snapshots" | "synthetic" // Source of the data
+  dataSource?: "ohlcv" | "snapshots" | "synthetic" | "dune" // Source of the data
 }
 
 const PERIODS = [
@@ -332,6 +332,14 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-bonk/10 border border-bonk/20" title="Historical data unavailable - showing estimated distribution based on current 24h volume">
               <AlertTriangle className="w-3 h-3 text-bonk" />
               <span className="text-[10px] font-bold text-bonk tracking-wide">ESTIMATED</span>
+            </div>
+          ) : data?.dataSource === "dune" ? (
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 border border-success/20"
+              title="Accurate historical data from Dune Analytics - full on-chain coverage"
+            >
+              <Activity className="w-3 h-3 text-success" />
+              <span className="text-[10px] font-bold text-success tracking-wide">VERIFIED DATA</span>
             </div>
           ) : data?.dataSource === "snapshots" ? (
             <div

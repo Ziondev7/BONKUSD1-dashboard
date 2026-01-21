@@ -7,14 +7,20 @@ import { getVolumeSnapshots, saveVolumeSnapshot, getStorageStatus, type VolumeSn
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
+const DUNE_API = "https://api.dune.com/api/v1"
+const DUNE_QUERY_ID = "6572422" // USD1 Daily Volume query
 
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
+const DUNE_CACHE_TTL = 30 * 60 * 1000 // 30 minutes cache for Dune data (updates less frequently)
 const OHLCV_BATCH_SIZE = 5 // Fetch OHLCV for top 5 pools per batch (rate limit friendly)
 const MAX_OHLCV_POOLS = 30 // Maximum pools to fetch OHLCV from
+
+// Dune data cache
+let duneDataCache: { data: DuneVolumeData[]; timestamp: number } | null = null
 
 // ============================================
 // TYPES
@@ -26,6 +32,13 @@ interface VolumeDataPoint {
   poolCount?: number
   isOhlcv?: boolean // True if from real OHLCV data
   isSnapshot?: boolean // True if from stored snapshots
+  isDune?: boolean // True if from Dune historical data
+}
+
+interface DuneVolumeData {
+  date: string
+  trade_count: number
+  daily_volume_usd: number
 }
 
 interface PoolVolumeData {
@@ -44,7 +57,7 @@ interface CacheEntry {
   totalVolumePeriod: number
   poolCount: number
   ohlcvCoverage: number // Percentage of volume covered by real OHLCV
-  dataSource: "ohlcv" | "snapshots" | "synthetic"
+  dataSource: "ohlcv" | "snapshots" | "synthetic" | "dune"
 }
 
 // ============================================
@@ -76,6 +89,130 @@ function shouldExclude(symbol?: string): boolean {
   if (!symbol) return false
   const s = symbol.toUpperCase()
   return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
+}
+
+// ============================================
+// DUNE API FUNCTIONS
+// ============================================
+
+/**
+ * Fetch historical USD1 volume data from Dune Analytics
+ * Returns daily volume data from the saved query
+ */
+async function fetchDuneHistoricalVolume(): Promise<DuneVolumeData[]> {
+  const duneApiKey = process.env.DUNE_API_KEY
+
+  if (!duneApiKey) {
+    console.log("[Dune] No API key configured, skipping Dune data")
+    return []
+  }
+
+  // Check cache first
+  if (duneDataCache && Date.now() - duneDataCache.timestamp < DUNE_CACHE_TTL) {
+    console.log(`[Dune] Using cached data (${duneDataCache.data.length} days)`)
+    return duneDataCache.data
+  }
+
+  try {
+    console.log("[Dune] Fetching historical volume data...")
+    const response = await fetch(
+      `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=1000`,
+      {
+        headers: {
+          "x-dune-api-key": duneApiKey,
+        },
+      }
+    )
+
+    if (!response.ok) {
+      console.error(`[Dune] API error: ${response.status}`)
+      return duneDataCache?.data || []
+    }
+
+    const json = await response.json()
+    const rows = json.result?.rows || []
+
+    // Transform to our format
+    const data: DuneVolumeData[] = rows.map((row: any) => ({
+      date: row.date,
+      trade_count: Number(row.trade_count) || 0,
+      daily_volume_usd: Number(row.daily_volume_usd) || 0,
+    }))
+
+    // Update cache
+    duneDataCache = { data, timestamp: Date.now() }
+    console.log(`[Dune] Fetched ${data.length} days of historical data`)
+
+    return data
+  } catch (error) {
+    console.error("[Dune] Error fetching data:", error)
+    return duneDataCache?.data || []
+  }
+}
+
+/**
+ * Convert Dune daily volume data to VolumeDataPoint format
+ * Filters by the requested time period
+ */
+function duneDataToVolumePoints(
+  duneData: DuneVolumeData[],
+  cutoffTime: number,
+  period: string
+): { data: VolumeDataPoint[]; totalVolume: number } {
+  const now = Date.now()
+  let volumePoints: VolumeDataPoint[] = []
+  let totalVolume = 0
+
+  // Filter data by cutoff time
+  const filteredData = duneData.filter(d => {
+    const timestamp = new Date(d.date).getTime()
+    return timestamp >= cutoffTime && timestamp <= now
+  })
+
+  // Sort by date ascending
+  filteredData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  // Aggregate based on period
+  if (period === "7d" || period === "1m") {
+    // Daily data points
+    volumePoints = filteredData.map(d => ({
+      timestamp: new Date(d.date).getTime(),
+      volume: Math.round(d.daily_volume_usd),
+      trades: d.trade_count,
+      isDune: true,
+    }))
+    totalVolume = filteredData.reduce((sum, d) => sum + d.daily_volume_usd, 0)
+  } else if (period === "all") {
+    // Weekly aggregation for all-time view
+    const weeklyBuckets = new Map<number, { volume: number; trades: number }>()
+
+    filteredData.forEach(d => {
+      const date = new Date(d.date)
+      // Get start of week (Sunday)
+      const startOfWeek = new Date(date)
+      startOfWeek.setDate(date.getDate() - date.getDay())
+      startOfWeek.setHours(0, 0, 0, 0)
+      const weekTimestamp = startOfWeek.getTime()
+
+      const existing = weeklyBuckets.get(weekTimestamp) || { volume: 0, trades: 0 }
+      existing.volume += d.daily_volume_usd
+      existing.trades += d.trade_count
+      weeklyBuckets.set(weekTimestamp, existing)
+    })
+
+    volumePoints = Array.from(weeklyBuckets.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([timestamp, data]) => ({
+        timestamp,
+        volume: Math.round(data.volume),
+        trades: data.trades,
+        isDune: true,
+      }))
+
+    totalVolume = filteredData.reduce((sum, d) => sum + d.daily_volume_usd, 0)
+  }
+
+  return { data: volumePoints, totalVolume: Math.round(totalVolume) }
 }
 
 // ============================================
@@ -365,8 +502,9 @@ function snapshotsToVolumeData(
 
 /**
  * Main function to fetch accurate volume history
- * Strategy: Always use OHLCV data to get actual per-period volumes
- * This gives accurate totals (sum of all bars = total volume for period)
+ * Strategy:
+ * - 24h: Use OHLCV from GeckoTerminal, scaled to Raydium total
+ * - 7d/1m/all: Use Dune Analytics for accurate historical data
  */
 async function fetchBonkFunVolumeHistory(period: string): Promise<{
   data: VolumeDataPoint[]
@@ -375,7 +513,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   totalVolumePeriod: number
   poolCount: number
   ohlcvCoverage: number
-  dataSource: "ohlcv" | "snapshots" | "synthetic"
+  dataSource: "ohlcv" | "snapshots" | "synthetic" | "dune"
 }> {
   console.log(`[Volume] Fetching BONK.fun/USD1 volume data for period: ${period}`)
 
@@ -416,7 +554,30 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       cutoffTime = now - 24 * 60 * 60 * 1000
   }
 
-  // Step 3: Always use OHLCV for accurate per-period volumes
+  // Step 3: For 7d/1m/all, use Dune Analytics for accurate historical data
+  if (period !== "24h") {
+    const duneData = await fetchDuneHistoricalVolume()
+
+    if (duneData.length > 0) {
+      const { data: volumePoints, totalVolume } = duneDataToVolumePoints(duneData, cutoffTime, period)
+
+      if (volumePoints.length >= 2) {
+        console.log(`[Volume] Using Dune data: ${volumePoints.length} data points, total: $${totalVolume.toLocaleString()}`)
+        return {
+          data: volumePoints,
+          synthetic: false,
+          totalVolume24h,
+          totalVolumePeriod: totalVolume,
+          poolCount: pools.length,
+          ohlcvCoverage: 100, // Dune has full coverage
+          dataSource: "dune",
+        }
+      }
+    }
+    console.log("[Volume] Dune data not available, falling back to OHLCV")
+  }
+
+  // Step 4: For 24h (or fallback), use OHLCV
   let timeframe: string
   let aggregate: number
 
