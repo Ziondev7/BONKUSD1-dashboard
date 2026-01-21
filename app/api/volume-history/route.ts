@@ -474,39 +474,55 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 /**
  * Create a realistic volume distribution when OHLCV data isn't available
  * Uses typical crypto trading patterns (higher volume during US trading hours)
+ *
+ * IMPORTANT: totalVolume24h is the current 24h volume from Raydium.
+ * For longer periods, we need to SCALE this to estimate historical volume:
+ * - 24h: use as-is
+ * - 7d: multiply by 7 (7 days worth)
+ * - 1m: multiply by 30 (30 days worth)
+ * - all: multiply by ~90 (estimate ~3 months of activity)
  */
-function createVolumeDistribution(totalVolume: number, period: string, poolCount: number): VolumeDataPoint[] {
+function createVolumeDistribution(totalVolume24h: number, period: string, poolCount: number): VolumeDataPoint[] {
   const now = Date.now()
   const data: VolumeDataPoint[] = []
 
   let points: number
   let intervalMs: number
+  let periodMultiplier: number // How many days of volume to estimate
 
   switch (period) {
     case "24h":
       points = 24
       intervalMs = 60 * 60 * 1000
+      periodMultiplier = 1
       break
     case "7d":
       points = 7 * 4 // 4-hour candles for 7 days
       intervalMs = 4 * 60 * 60 * 1000
+      periodMultiplier = 7
       break
     case "1m":
       points = 30
       intervalMs = 24 * 60 * 60 * 1000
+      periodMultiplier = 30
       break
     case "all":
       points = 12
       intervalMs = 7 * 24 * 60 * 60 * 1000
+      periodMultiplier = 90 // Estimate ~3 months of historical volume
       break
     default:
       points = 24
       intervalMs = 60 * 60 * 1000
+      periodMultiplier = 1
   }
+
+  // Scale the 24h volume by the period length to get estimated total for the period
+  const estimatedPeriodVolume = totalVolume24h * periodMultiplier
 
   // For 24h, distribute with typical trading pattern (more volume during active hours)
   // For longer periods, use more uniform distribution with slight trend
-  const volumePerInterval = totalVolume / points
+  const volumePerInterval = estimatedPeriodVolume / points
 
   for (let i = points - 1; i >= 0; i--) {
     const timestamp = now - (i * intervalMs)
@@ -540,10 +556,10 @@ function createVolumeDistribution(totalVolume: number, period: string, poolCount
     })
   }
 
-  // Normalize to ensure total matches
+  // Normalize to ensure total matches the estimated period volume
   const currentTotal = data.reduce((sum, d) => sum + d.volume, 0)
   if (currentTotal > 0) {
-    const normalizeFactor = totalVolume / currentTotal
+    const normalizeFactor = estimatedPeriodVolume / currentTotal
     data.forEach(d => {
       d.volume = Math.round(d.volume * normalizeFactor)
     })
