@@ -22,26 +22,18 @@ interface VolumeDataPoint {
   isWeekly?: boolean
 }
 
-interface DuneDailyRow {
-  date: string
-  num_trades: number
-  unique_tokens: number
-  total_volume_usd: number
+interface DuneRow {
+  dt: string           // datetime like "2026-01-20 00:00:00.000 UTC"
+  category: string     // "bonk", "pumpdotfun", "moonshot", "bags", "believe"
+  volume_usd: number   // volume in USD
 }
 
-interface DuneWeeklyRow {
-  week_start: string
-  num_trades: number
-  unique_tokens: number
-  total_volume_usd: number
-}
-
-interface DuneApiResponse<T> {
+interface DuneApiResponse {
   execution_id: string
   query_id: number
   state: string
   result?: {
-    rows: T[]
+    rows: DuneRow[]
     metadata: {
       column_names: string[]
       result_set_bytes: number
@@ -66,12 +58,12 @@ const volumeCache: Map<string, CacheEntry> = new Map()
 
 // Separate caches for daily and weekly Dune data
 let duneDailyCache: {
-  data: DuneDailyRow[]
+  data: DuneRow[]
   timestamp: number
 } | null = null
 
 let duneWeeklyCache: {
-  data: DuneWeeklyRow[]
+  data: DuneRow[]
   timestamp: number
 } | null = null
 
@@ -81,8 +73,9 @@ let duneWeeklyCache: {
 
 /**
  * Fetch daily volume data from Dune Analytics (query 5440992)
+ * Filters for "bonk" category only (BONK coins paired with USD1)
  */
-async function fetchDuneDailyVolume(): Promise<DuneDailyRow[] | null> {
+async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
   // Check cache first
   if (duneDailyCache && Date.now() - duneDailyCache.timestamp < DUNE_CACHE_TTL) {
     console.log("[LaunchpadVolume] Using cached daily Dune data")
@@ -119,17 +112,18 @@ async function fetchDuneDailyVolume(): Promise<DuneDailyRow[] | null> {
       return null
     }
 
-    const data: DuneApiResponse<DuneDailyRow> = await response.json()
+    const data: DuneApiResponse = await response.json()
 
     if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
       console.error("[LaunchpadVolume] Dune daily query not ready or no results")
       return null
     }
 
-    const rows = data.result.rows
-    console.log(`[LaunchpadVolume] Fetched ${rows.length} days of daily data from Dune`)
+    // Filter for "bonk" category only (BONK coins paired with USD1)
+    const rows = data.result.rows.filter(row => row.category === "bonk")
+    console.log(`[LaunchpadVolume] Fetched ${rows.length} days of BONK daily data from Dune`)
 
-    // Cache the data
+    // Cache the filtered data
     duneDailyCache = {
       data: rows,
       timestamp: Date.now(),
@@ -144,8 +138,9 @@ async function fetchDuneDailyVolume(): Promise<DuneDailyRow[] | null> {
 
 /**
  * Fetch weekly volume data from Dune Analytics (query 5468582)
+ * Filters for "bonk" category only (BONK coins paired with USD1)
  */
-async function fetchDuneWeeklyVolume(): Promise<DuneWeeklyRow[] | null> {
+async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
   // Check cache first
   if (duneWeeklyCache && Date.now() - duneWeeklyCache.timestamp < DUNE_CACHE_TTL) {
     console.log("[LaunchpadVolume] Using cached weekly Dune data")
@@ -182,17 +177,18 @@ async function fetchDuneWeeklyVolume(): Promise<DuneWeeklyRow[] | null> {
       return null
     }
 
-    const data: DuneApiResponse<DuneWeeklyRow> = await response.json()
+    const data: DuneApiResponse = await response.json()
 
     if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
       console.error("[LaunchpadVolume] Dune weekly query not ready or no results")
       return null
     }
 
-    const rows = data.result.rows
-    console.log(`[LaunchpadVolume] Fetched ${rows.length} weeks of weekly data from Dune`)
+    // Filter for "bonk" category only (BONK coins paired with USD1)
+    const rows = data.result.rows.filter(row => row.category === "bonk")
+    console.log(`[LaunchpadVolume] Fetched ${rows.length} weeks of BONK weekly data from Dune`)
 
-    // Cache the data
+    // Cache the filtered data
     duneWeeklyCache = {
       data: rows,
       timestamp: Date.now(),
@@ -210,72 +206,18 @@ async function fetchDuneWeeklyVolume(): Promise<DuneWeeklyRow[] | null> {
 // ============================================
 
 /**
- * Convert and filter daily data by period
+ * Process daily data - convert Dune rows to VolumeDataPoints
  */
 function processDailyData(
-  rows: DuneDailyRow[],
-  period: string
-): { data: VolumeDataPoint[]; totalVolume: number; tokenCount: number } {
-  const now = Date.now()
-  let cutoffTime: number
-
-  switch (period) {
-    case "24h":
-      cutoffTime = now - 24 * 60 * 60 * 1000
-      break
-    case "7d":
-      cutoffTime = now - 7 * 24 * 60 * 60 * 1000
-      break
-    case "1m":
-      cutoffTime = now - 30 * 24 * 60 * 60 * 1000
-      break
-    case "all":
-      cutoffTime = 0
-      break
-    default:
-      cutoffTime = now - 24 * 60 * 60 * 1000
-  }
-
-  // Filter and convert rows
-  const filteredRows = rows
-    .map(row => ({
-      timestamp: new Date(row.date).getTime(),
-      volume: row.total_volume_usd,
-      trades: row.num_trades,
-      tokenCount: row.unique_tokens,
-    }))
-    .filter(row => row.timestamp >= cutoffTime && row.timestamp <= now)
-    .sort((a, b) => a.timestamp - b.timestamp)
-
-  const data: VolumeDataPoint[] = filteredRows.map(row => ({
-    timestamp: row.timestamp,
-    volume: Math.round(row.volume),
-    trades: row.trades,
-    tokenCount: row.tokenCount,
-    isWeekly: false,
-  }))
-
-  const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
-  const tokenCount = Math.max(...filteredRows.map(r => r.tokenCount), 0)
-
-  return { data, totalVolume, tokenCount }
-}
-
-/**
- * Process weekly data for ALL period
- */
-function processWeeklyData(
-  rows: DuneWeeklyRow[]
+  rows: DuneRow[]
 ): { data: VolumeDataPoint[]; totalVolume: number; tokenCount: number } {
   const now = Date.now()
 
   // Filter and convert rows
   const filteredRows = rows
     .map(row => ({
-      timestamp: new Date(row.week_start).getTime(),
-      volume: row.total_volume_usd,
-      trades: row.num_trades,
-      tokenCount: row.unique_tokens,
+      timestamp: new Date(row.dt).getTime(),
+      volume: row.volume_usd,
     }))
     .filter(row => row.timestamp <= now)
     .sort((a, b) => a.timestamp - b.timestamp)
@@ -283,15 +225,40 @@ function processWeeklyData(
   const data: VolumeDataPoint[] = filteredRows.map(row => ({
     timestamp: row.timestamp,
     volume: Math.round(row.volume),
-    trades: row.trades,
-    tokenCount: row.tokenCount,
+    isWeekly: false,
+  }))
+
+  const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
+
+  return { data, totalVolume, tokenCount: data.length }
+}
+
+/**
+ * Process weekly data - convert Dune rows to VolumeDataPoints
+ */
+function processWeeklyData(
+  rows: DuneRow[]
+): { data: VolumeDataPoint[]; totalVolume: number; tokenCount: number } {
+  const now = Date.now()
+
+  // Filter and convert rows
+  const filteredRows = rows
+    .map(row => ({
+      timestamp: new Date(row.dt).getTime(),
+      volume: row.volume_usd,
+    }))
+    .filter(row => row.timestamp <= now)
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+  const data: VolumeDataPoint[] = filteredRows.map(row => ({
+    timestamp: row.timestamp,
+    volume: Math.round(row.volume),
     isWeekly: true,
   }))
 
   const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
-  const tokenCount = Math.max(...filteredRows.map(r => r.tokenCount), 0)
 
-  return { data, totalVolume, tokenCount }
+  return { data, totalVolume, tokenCount: data.length }
 }
 
 /**
@@ -320,7 +287,7 @@ async function fetchLaunchpadVolume(period: string): Promise<{
   // For daily period, use daily data (return all available daily data)
   const dailyData = await fetchDuneDailyVolume()
   if (dailyData && dailyData.length > 0) {
-    const processed = processDailyData(dailyData, "all") // Get all daily data
+    const processed = processDailyData(dailyData)
     console.log(`[LaunchpadVolume] Returning ${processed.data.length} daily data points`)
     return { ...processed, source: "dune-daily" }
   }
