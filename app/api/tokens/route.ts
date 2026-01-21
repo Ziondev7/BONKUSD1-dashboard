@@ -527,45 +527,35 @@ const holderCountCache = new Map<string, { holders: number; timestamp: number }>
 const HOLDER_CACHE_TTL = 30 * 60 * 1000 // 30 minutes (holder counts don't change rapidly)
 
 /**
- * Fetch holder count from Solscan API (accurate total count)
+ * Fetch holder count using Helius getTokenAccounts API
+ * This returns the total number of accounts holding the token
  */
-async function fetchHolderCountFromSolscan(mint: string): Promise<number> {
-  try {
-    const response = await fetchWithTimeout(
-      `https://api.solscan.io/token/holders/total?token=${mint}`,
-      5000
-    )
-
-    if (response.ok) {
-      const data = await response.json()
-      // Solscan returns { success: true, data: { total: number } }
-      if (data.success && data.data?.total !== undefined) {
-        return data.data.total
-      }
-    }
-  } catch {
-    // Silent fail
-  }
-  return 0
-}
-
-/**
- * Fetch holder count from Birdeye API (requires API key but more reliable)
- */
-async function fetchHolderCountFromBirdeye(mint: string): Promise<number> {
-  const apiKey = process.env.BIRDEYE_API_KEY
+async function fetchHolderCountFromHelius(mint: string): Promise<number> {
+  const apiKey = process.env.HELIUS_API_KEY
   if (!apiKey) return 0
 
   try {
-    const response = await fetchWithTimeout(
-      `https://public-api.birdeye.so/defi/token_overview?address=${mint}`,
-      5000
-    )
+    // Use Helius DAS API getTokenAccounts which returns total count
+    const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: mint,
+        method: "getTokenAccounts",
+        params: {
+          mint: mint,
+          page: 1,
+          limit: 1, // We only need the total count, not the actual accounts
+        },
+      }),
+    })
 
     if (response.ok) {
       const data = await response.json()
-      if (data.success && data.data?.holder !== undefined) {
-        return data.data.holder
+      // Helius returns { result: { total: number, token_accounts: [...] } }
+      if (data.result?.total !== undefined) {
+        return data.result.total
       }
     }
   } catch {
@@ -576,12 +566,16 @@ async function fetchHolderCountFromBirdeye(mint: string): Promise<number> {
 
 /**
  * Batch fetch holder counts for multiple tokens
- * Uses Solscan API for accurate holder counts with fallback options
+ * Uses Helius API for accurate holder counts
  */
 async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> {
   const holderMap = new Map<string, number>()
+  const apiKey = process.env.HELIUS_API_KEY
 
-  if (mints.length === 0) return holderMap
+  if (!apiKey || mints.length === 0) {
+    console.log("[API] No HELIUS_API_KEY or no mints to fetch")
+    return holderMap
+  }
 
   // Check which mints need fetching (not in cache)
   const mintsToFetch: string[] = []
@@ -599,10 +593,10 @@ async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> 
     return holderMap
   }
 
-  console.log(`[API] Fetching holder counts: ${holderMap.size} cached, ${mintsToFetch.length} to fetch`)
+  console.log(`[API] Fetching holder counts: ${holderMap.size} cached, ${mintsToFetch.length} to fetch via Helius`)
 
-  // Process in small batches to respect rate limits (Solscan has strict limits)
-  const BATCH_SIZE = 5
+  // Process in batches to respect rate limits
+  const BATCH_SIZE = 10
   let fetchedCount = 0
   let failedCount = 0
 
@@ -610,13 +604,7 @@ async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> 
     const batch = mintsToFetch.slice(i, i + BATCH_SIZE)
 
     const batchPromises = batch.map(async (mint) => {
-      // Try Solscan first (free, accurate)
-      let holders = await fetchHolderCountFromSolscan(mint)
-
-      // Fallback to Birdeye if Solscan fails and we have API key
-      if (holders === 0 && process.env.BIRDEYE_API_KEY) {
-        holders = await fetchHolderCountFromBirdeye(mint)
-      }
+      const holders = await fetchHolderCountFromHelius(mint)
 
       if (holders > 0) {
         holderCountCache.set(mint, { holders, timestamp: Date.now() })
@@ -633,9 +621,9 @@ async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> 
       holderMap.set(mint, holders)
     })
 
-    // Delay between batches to respect rate limits (Solscan is strict)
+    // Small delay between batches
     if (i + BATCH_SIZE < mintsToFetch.length) {
-      await new Promise(resolve => setTimeout(resolve, 200))
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 
