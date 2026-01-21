@@ -27,3 +27,4 @@ yarn-error.log*
 next-env.d.ts
 bonkusd1-dashboard-v0.zip
 *.zip
+.env.local

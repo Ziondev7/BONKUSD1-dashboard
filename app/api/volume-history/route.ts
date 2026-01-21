@@ -671,21 +671,21 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 }> {
   console.log(`[Volume] Fetching BONK.fun/USD1 volume data for period: ${period}`)
 
-  // Step 1: Get current data from Raydium (always needed for latest snapshot)
+  // Step 1: Try to get current data from Raydium (for latest snapshot)
   const { pools, totalVolume24h, totalLiquidity } = await fetchAllRaydiumUSD1Pools()
+  const hasRaydiumData = pools.length > 0 && totalVolume24h > 0
 
-  if (pools.length === 0 || totalVolume24h === 0) {
-    console.log("[Volume] No BONK.fun/USD1 pools found")
-    return { data: [], synthetic: true, totalVolume24h: 0, totalVolumePeriod: 0, poolCount: 0, ohlcvCoverage: 0, dataSource: "synthetic" }
+  if (hasRaydiumData) {
+    // Save current snapshot for historical tracking
+    await saveVolumeSnapshot({
+      timestamp: Date.now(),
+      totalVolume24h,
+      totalLiquidity,
+      poolCount: pools.length,
+    })
+  } else {
+    console.log("[Volume] Raydium unavailable, will use Dune with pattern matching")
   }
-
-  // Save current snapshot for historical tracking
-  await saveVolumeSnapshot({
-    timestamp: Date.now(),
-    totalVolume24h,
-    totalLiquidity,
-    poolCount: pools.length,
-  })
 
   // Step 2: Determine cutoff time based on period
   const now = Date.now()
@@ -708,14 +708,15 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       cutoffTime = now - 24 * 60 * 60 * 1000
   }
 
-  // Step 3: For 7d/1m/all, use Dune Analytics for accurate historical data
-  if (period !== "24h") {
-    // Get BONK.fun token mint addresses to filter Dune data
-    const bonkfunTokenMints = new Set(pools.map(p => p.tokenMint.toLowerCase()))
-    console.log(`[Volume] Will filter Dune data by ${bonkfunTokenMints.size} BONK.fun token mints`)
-    // Log first few token mints for debugging
-    const mintSample = Array.from(bonkfunTokenMints).slice(0, 5)
-    console.log(`[Volume] Sample token mints: ${mintSample.join(', ')}`)
+  // Step 3: For 7d/1m/all (or when Raydium fails), use Dune Analytics for historical data
+  // Dune will use pattern matching (tokens ending in 'bonk') when Raydium data isn't available
+  if (period !== "24h" || !hasRaydiumData) {
+    // Get BONK.fun token mint addresses to filter Dune data (or empty set for pattern matching)
+    const bonkfunTokenMints = hasRaydiumData
+      ? new Set(pools.map(p => p.tokenMint.toLowerCase()))
+      : new Set<string>() // Empty set triggers pattern matching in fetchDuneHistoricalVolume
+
+    console.log(`[Volume] Will filter Dune data by ${bonkfunTokenMints.size > 0 ? `${bonkfunTokenMints.size} BONK.fun token mints` : "pattern matching (tokens ending in 'bonk')"}`)
 
     const duneData = await fetchDuneHistoricalVolume(bonkfunTokenMints)
 
@@ -723,18 +724,33 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       const { data: volumePoints, totalVolume } = duneDataToVolumePoints(duneData, cutoffTime, period)
 
       if (volumePoints.length >= 2) {
+        // Calculate estimated 24h volume from most recent day if Raydium unavailable
+        const estimated24hVolume = hasRaydiumData
+          ? totalVolume24h
+          : (volumePoints.length > 0 ? volumePoints[volumePoints.length - 1].volume : 0)
+
+        // Estimate pool count from unique tokens in Dune data if Raydium unavailable
+        const estimatedPoolCount = hasRaydiumData ? pools.length : Math.round(duneData.length / volumePoints.length)
+
         console.log(`[Volume] Using Dune data: ${volumePoints.length} data points, total: $${totalVolume.toLocaleString()}`)
         return {
           data: volumePoints,
           synthetic: false,
-          totalVolume24h,
+          totalVolume24h: estimated24hVolume,
           totalVolumePeriod: totalVolume,
-          poolCount: pools.length,
+          poolCount: estimatedPoolCount,
           ohlcvCoverage: 100, // Dune has full coverage for BONK.fun pools
           dataSource: "dune",
         }
       }
     }
+
+    // If Dune failed and we have no Raydium data, return empty
+    if (!hasRaydiumData) {
+      console.log("[Volume] No data available from Dune or Raydium")
+      return { data: [], synthetic: true, totalVolume24h: 0, totalVolumePeriod: 0, poolCount: 0, ohlcvCoverage: 0, dataSource: "synthetic" }
+    }
+
     console.log("[Volume] Dune data not available, falling back to OHLCV")
   }
 
