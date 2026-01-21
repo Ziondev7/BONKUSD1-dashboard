@@ -171,26 +171,46 @@ async function fetchDuneHistoricalVolume(bonkfunTokenMints?: Set<string>): Promi
     console.log(`[Dune] Using cached raw data (${duneRawDataCache.rows.length} rows)`)
     rows = duneRawDataCache.rows
   } else {
-    // Fetch fresh raw data from Dune
+    // Fetch fresh raw data from Dune with pagination
     try {
       console.log("[Dune] Fetching historical volume data...")
-      const response = await fetch(
-        `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=10000`,
-        {
+      const PAGE_SIZE = 10000
+      const MAX_PAGES = 10 // Safety limit: max 100k rows
+      let offset = 0
+      let hasMore = true
+      let pageCount = 0
+
+      while (hasMore && pageCount < MAX_PAGES) {
+        const url = `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=${PAGE_SIZE}&offset=${offset}`
+        const response = await fetch(url, {
           headers: {
             "x-dune-api-key": duneApiKey,
           },
+        })
+
+        if (!response.ok) {
+          console.error(`[Dune] API error: ${response.status}`)
+          if (rows.length === 0) {
+            rows = duneRawDataCache?.rows || []
+          }
+          break
         }
-      )
 
-      if (!response.ok) {
-        console.error(`[Dune] API error: ${response.status}`)
-        rows = duneRawDataCache?.rows || []
-      } else {
         const json = await response.json()
-        rows = json.result?.rows || []
+        const pageRows = json.result?.rows || []
+        rows = rows.concat(pageRows)
+        pageCount++
 
-        // Cache raw data
+        // Check if there's more data
+        const totalRows = json.result?.metadata?.total_row_count || 0
+        hasMore = json.next_uri && rows.length < totalRows
+        offset = json.next_offset || (offset + PAGE_SIZE)
+
+        console.log(`[Dune] Page ${pageCount}: fetched ${pageRows.length} rows (total: ${rows.length}/${totalRows})`)
+      }
+
+      // Cache raw data
+      if (rows.length > 0) {
         duneRawDataCache = { rows, timestamp: Date.now() }
         console.log(`[Dune] Cached ${rows.length} raw rows`)
       }
@@ -209,34 +229,49 @@ async function fetchDuneHistoricalVolume(bonkfunTokenMints?: Set<string>): Promi
   console.log(`[Dune] Sample row keys: ${Object.keys(rows[0]).join(', ')}`)
   console.log(`[Dune] Sample row: ${JSON.stringify(rows[0])}`)
 
-  // Check if data has token_mint or pool_address field (per-token/pool query)
-  const hasTokenData = rows[0].token_mint || rows[0].pool_address
+  // Check if data has token_mint field (per-token query)
+  const hasTokenData = !!rows[0].token_mint
 
   let data: DuneVolumeData[]
 
-  if (hasTokenData && bonkfunTokenMints && bonkfunTokenMints.size > 0) {
-    // Filter by BONK.fun token mints and aggregate by date
-    console.log(`[Dune] Filtering by ${bonkfunTokenMints.size} BONK.fun tokens...`)
+  if (hasTokenData) {
+    // Filter to BONK.fun tokens only (tokens ending in 'bonk')
+    // This is more reliable than matching against Raydium since BONK.fun tokens always end with 'bonk'
+    const isBonkfunToken = (mint: string) => mint.toLowerCase().endsWith('bonk')
+
+    // If we have Raydium token mints, use them for validation; otherwise use pattern matching
+    const usePatternMatching = !bonkfunTokenMints || bonkfunTokenMints.size === 0
+
+    if (usePatternMatching) {
+      console.log("[Dune] Using pattern matching (tokens ending in 'bonk')...")
+    } else {
+      console.log(`[Dune] Filtering by ${bonkfunTokenMints!.size} Raydium tokens + pattern matching...`)
+    }
 
     const dateAggregates = new Map<string, { volume: number; trades: number }>()
     let matchedRows = 0
-    const unmatchedTokens = new Set<string>()
     const matchedTokens = new Set<string>()
+    const excludedTokens = new Set<string>()
 
     rows.forEach((row) => {
-      // Try token_mint first, then fall back to pool_address
-      const identifier = (row.token_mint || row.pool_address || "").toLowerCase()
+      const tokenMint = (row.token_mint || "").toLowerCase()
 
-      // Only include tokens that are in our BONK.fun token list
-      if (bonkfunTokenMints.has(identifier)) {
+      // Include if:
+      // 1. Pattern matching mode: token ends with 'bonk'
+      // 2. Raydium mode: token is in Raydium list OR ends with 'bonk' (safety fallback)
+      const isMatch = usePatternMatching
+        ? isBonkfunToken(tokenMint)
+        : (bonkfunTokenMints!.has(tokenMint) || isBonkfunToken(tokenMint))
+
+      if (isMatch) {
         matchedRows++
-        matchedTokens.add(identifier)
+        matchedTokens.add(tokenMint)
         const existing = dateAggregates.get(row.date) || { volume: 0, trades: 0 }
         existing.volume += Number(row.daily_volume_usd) || 0
         existing.trades += Number(row.trade_count) || 0
         dateAggregates.set(row.date, existing)
       } else {
-        unmatchedTokens.add(identifier)
+        excludedTokens.add(tokenMint)
       }
     })
 
@@ -246,25 +281,16 @@ async function fetchDuneHistoricalVolume(bonkfunTokenMints?: Set<string>): Promi
       daily_volume_usd: agg.volume,
     }))
 
-    console.log(`[Dune] Matched ${matchedRows} rows from ${matchedTokens.size} unique tokens -> ${data.length} days`)
-    console.log(`[Dune] Unmatched: ${unmatchedTokens.size} unique tokens`)
+    console.log(`[Dune] Matched ${matchedRows} rows from ${matchedTokens.size} BONK.fun tokens -> ${data.length} days`)
+    console.log(`[Dune] Excluded ${excludedTokens.size} non-BONK.fun tokens (USDC, SOL, WLFI, etc.)`)
 
-    // Enhanced debugging: show sample comparison
-    if (matchedTokens.size === 0 && unmatchedTokens.size > 0) {
-      const sampleUnmatched = Array.from(unmatchedTokens).slice(0, 3)
-      const sampleFromRaydium = Array.from(bonkfunTokenMints).slice(0, 3)
-      console.log(`[Dune] DEBUG - Sample Dune tokens: ${sampleUnmatched.join(', ')}`)
-      console.log(`[Dune] DEBUG - Sample Raydium tokens: ${sampleFromRaydium.join(', ')}`)
-    } else if (matchedTokens.size > 0) {
-      console.log(`[Dune] Sample matched: ${Array.from(matchedTokens).slice(0, 3).join(', ')}`)
+    if (matchedTokens.size > 0) {
+      console.log(`[Dune] Sample BONK.fun tokens: ${Array.from(matchedTokens).slice(0, 3).join(', ')}`)
     }
   } else {
-    // No token filtering available - use data as-is (aggregated format)
-    // This fallback handles the old query format
-    console.log("[Dune] Using aggregated data (no token filtering available)")
-    if (!hasTokenData) {
-      console.log("[Dune] HINT: Update your Dune query to include 'token_mint' field for BONK.fun filtering")
-    }
+    // No token_mint field - use data as-is (aggregated format from old query)
+    console.log("[Dune] Using aggregated data (no token_mint field available)")
+    console.log("[Dune] HINT: Update your Dune query to include 'token_mint' field for BONK.fun filtering")
 
     data = rows.map((row) => ({
       date: row.date,
