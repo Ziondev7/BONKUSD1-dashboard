@@ -14,9 +14,10 @@ const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 // Dune Analytics API for fallback when KV is empty
 const DUNE_API = "https://api.dune.com/api/v1"
 const DUNE_QUERY_ID = "6572422" // BonkFun USD1 Daily Volume query
+const DUNE_TOKEN_LIST_QUERY_ID = "6575979" // BonkFun token mint list query
 
-// Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
-const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
+// Cache TTL for BonkFun token list (refresh every 6 hours)
+const TOKEN_LIST_CACHE_TTL = 6 * 60 * 60 * 1000
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
@@ -94,6 +95,12 @@ let duneDataCache: {
   timestamp: number
 } | null = null
 
+// Cache for BonkFun token whitelist (fetched from Dune)
+let bonkfunTokenListCache: {
+  tokens: Set<string>
+  timestamp: number
+} | null = null
+
 // Volume snapshot store for historical tracking
 // (In production, this would be Vercel KV or another persistent store)
 interface VolumeSnapshot {
@@ -125,10 +132,104 @@ async function fetchWithTimeout(url: string, timeout = 10000): Promise<Response>
   }
 }
 
-function shouldExclude(symbol?: string): boolean {
-  if (!symbol) return false
-  const s = symbol.toUpperCase()
-  return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
+// ============================================
+// BONKFUN TOKEN WHITELIST (from Dune)
+// ============================================
+
+interface DuneTokenListRow {
+  token_mint: string
+}
+
+interface DuneTokenListResponse {
+  execution_id: string
+  query_id: number
+  state: string
+  result?: {
+    rows: DuneTokenListRow[]
+    metadata: {
+      column_names: string[]
+      result_set_bytes: number
+      total_row_count: number
+    }
+  }
+}
+
+/**
+ * Fetch the list of valid BonkFun token mints from Dune
+ * These are tokens created via LaunchLab with LetsBonk platform, paired with USD1
+ */
+async function fetchBonkFunTokenList(): Promise<Set<string>> {
+  // Check cache first
+  if (bonkfunTokenListCache && Date.now() - bonkfunTokenListCache.timestamp < TOKEN_LIST_CACHE_TTL) {
+    console.log(`[Volume] Using cached BonkFun token list (${bonkfunTokenListCache.tokens.size} tokens)`)
+    return bonkfunTokenListCache.tokens
+  }
+
+  const duneApiKey = process.env.DUNE_API_KEY
+  if (!duneApiKey) {
+    console.log("[Volume] No DUNE_API_KEY configured, cannot fetch token whitelist")
+    return new Set()
+  }
+
+  try {
+    console.log("[Volume] Fetching BonkFun token list from Dune...")
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+    const response = await fetch(
+      `${DUNE_API}/query/${DUNE_TOKEN_LIST_QUERY_ID}/results?limit=10000`,
+      {
+        signal: controller.signal,
+        headers: {
+          "x-dune-api-key": duneApiKey,
+          Accept: "application/json",
+        },
+      }
+    )
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      console.error("[Volume] Dune token list API error:", response.status)
+      return bonkfunTokenListCache?.tokens || new Set()
+    }
+
+    const data: DuneTokenListResponse = await response.json()
+
+    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
+      console.error("[Volume] Dune token list query not ready or no results")
+      return bonkfunTokenListCache?.tokens || new Set()
+    }
+
+    const tokens = new Set<string>()
+    for (const row of data.result.rows) {
+      if (row.token_mint) {
+        tokens.add(row.token_mint)
+      }
+    }
+
+    console.log(`[Volume] Fetched ${tokens.size} BonkFun token mints from Dune`)
+
+    // Cache the token list
+    bonkfunTokenListCache = {
+      tokens,
+      timestamp: Date.now(),
+    }
+
+    return tokens
+  } catch (error) {
+    console.error("[Volume] Error fetching BonkFun token list:", error)
+    return bonkfunTokenListCache?.tokens || new Set()
+  }
+}
+
+/**
+ * Check if a token mint is a valid BonkFun token
+ */
+async function isBonkFunToken(mintAddress: string): Promise<boolean> {
+  const tokenList = await fetchBonkFunTokenList()
+  return tokenList.has(mintAddress)
 }
 
 // ============================================
@@ -269,6 +370,16 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
   let totalLiquidity = 0
 
   try {
+    // First, fetch the BonkFun token whitelist from Dune
+    const bonkfunTokens = await fetchBonkFunTokenList()
+    const useWhitelist = bonkfunTokens.size > 0
+
+    if (useWhitelist) {
+      console.log(`[Volume] Using BonkFun token whitelist (${bonkfunTokens.size} tokens)`)
+    } else {
+      console.log("[Volume] WARNING: No BonkFun token whitelist available, results may include non-BonkFun tokens")
+    }
+
     const pageSize = 500
     const maxPages = 5
     const poolMap = new Map<string, PoolVolumeData>()
@@ -302,8 +413,10 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
       const pairedSymbol = isAUSD1 ? symbolB : symbolA
       const pairedMint = isAUSD1 ? mintB : mintA
 
-      // Exclude non-BONK.fun tokens
-      if (shouldExclude(pairedSymbol)) return
+      // Use whitelist to only include verified BonkFun tokens
+      if (useWhitelist) {
+        if (!bonkfunTokens.has(pairedMint)) return
+      }
 
       const volume24h = pool.day?.volume || 0
       const liquidity = pool.tvl || 0
@@ -356,7 +469,7 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
     // Sort by volume descending
     pools.sort((a, b) => b.volume24h - a.volume24h)
 
-    console.log(`[Volume] Found ${pools.length} BONK.fun/USD1 pools with total 24h volume: $${totalVolume24h.toLocaleString()}`)
+    console.log(`[Volume] Found ${pools.length} verified BonkFun/USD1 pools with total 24h volume: $${totalVolume24h.toLocaleString()}`)
   } catch (error) {
     console.error("[Volume] Error fetching Raydium pools:", error)
   }
