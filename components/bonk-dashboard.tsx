@@ -335,40 +335,36 @@ export function BonkDashboard() {
 
       {/* Main Content - Pro Mode (Bloomberg-style grid layout) */}
       {isProMode && (
-        <main className="relative z-10 h-[calc(100vh-80px)] mt-[80px] px-2 pb-2">
+        <main className="relative z-10 h-[calc(100vh-72px)] mt-[72px] px-3 pb-2 pt-2">
           <ErrorBoundary>
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3 }}
-              className="h-full grid grid-cols-[1fr_400px] gap-2"
+              className="h-full grid grid-cols-[1fr_380px] gap-3"
             >
-              {/* Left Panel - Charts & Metrics (scrollable bento grid) */}
-              <div className="h-full overflow-y-auto overflow-x-hidden pro-scroll pr-2">
-                <div className="grid grid-cols-2 gap-2 auto-rows-min">
-                  {/* Metrics Row - Compact */}
-                  <div className="col-span-2">
-                    <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} compact />
-                  </div>
+              {/* Left Panel - Charts & Metrics (fills available space) */}
+              <div className="h-full flex flex-col gap-2 overflow-hidden">
+                {/* Metrics Row - Compact */}
+                <div className="flex-shrink-0">
+                  <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} compact />
+                </div>
 
-                  {/* Charts Row - Side by Side */}
-                  <div className="col-span-1">
-                    <VolumeEvolution currentVolume={metrics.totalVolume} compact />
-                  </div>
-                  <div className="col-span-1">
-                    <LaunchpadVolume compact />
-                  </div>
+                {/* Charts Row - Side by Side (flex to fill space) */}
+                <div className="flex-1 grid grid-cols-2 gap-2 min-h-0">
+                  <VolumeEvolution currentVolume={metrics.totalVolume} compact />
+                  <LaunchpadVolume compact />
+                </div>
 
-                  {/* Top Performers - Compact */}
-                  <div className="col-span-2">
-                    <TopPerformers
-                      tokens={tokens.slice(0, 3)}
-                      topGainers={topGainers}
-                      topLosers={topLosers}
-                      onSelectToken={handleSelectToken}
-                      compact
-                    />
-                  </div>
+                {/* Top Performers - Compact */}
+                <div className="flex-shrink-0">
+                  <TopPerformers
+                    tokens={tokens.slice(0, 3)}
+                    topGainers={topGainers}
+                    topLosers={topLosers}
+                    onSelectToken={handleSelectToken}
+                    compact
+                  />
                 </div>
               </div>
 
