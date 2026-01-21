@@ -351,27 +351,45 @@ export async function bulkSaveDailyVolume(dataArray: DailyVolumeData[]): Promise
   let errors = 0
 
   if (kv) {
-    // Save each record with date as key
-    for (const data of dataArray) {
-      try {
-        const key = `${DAILY_VOLUME_KEY}:${data.date}`
-        await kv.set(key, JSON.stringify(data))
-        saved++
-      } catch (error) {
-        console.error(`[VolumeStore] Error saving ${data.date}:`, error)
-        errors++
-      }
+    // Test KV connection first
+    let kvWorking = false
+    try {
+      await kv.set("volume:test", "test-value")
+      console.log("[VolumeStore] KV connection test passed")
+      kvWorking = true
+    } catch (testError) {
+      console.error("[VolumeStore] KV connection test FAILED:", testError instanceof Error ? testError.message : testError)
     }
-    // Store the list of dates for iteration
-    if (saved > 0) {
-      try {
-        const dates = dataArray.map(d => d.date).sort()
-        await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
-      } catch (e) {
-        console.error("[VolumeStore] Error saving dates index:", e)
+
+    if (kvWorking) {
+      // Save each record with date as key
+      for (const data of dataArray) {
+        try {
+          const key = `${DAILY_VOLUME_KEY}:${data.date}`
+          await kv.set(key, JSON.stringify(data))
+          saved++
+          if (saved === 1) {
+            console.log(`[VolumeStore] First record saved successfully: ${data.date}`)
+          }
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error)
+          if (errors === 0) {
+            console.error(`[VolumeStore] First error saving ${data.date}:`, errMsg)
+          }
+          errors++
+        }
       }
+      // Store the list of dates for iteration
+      if (saved > 0) {
+        try {
+          const dates = dataArray.map(d => d.date).sort()
+          await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
+        } catch (e) {
+          console.error("[VolumeStore] Error saving dates index:", e)
+        }
+      }
+      return { success: errors === 0, saved, errors }
     }
-    return { success: errors === 0, saved, errors }
   }
 
   // Fallback to memory
