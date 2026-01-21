@@ -10,11 +10,14 @@ const CONFIG = {
   RAYDIUM_API: "https://api-v3.raydium.io",
   GECKOTERMINAL_API: "https://api.geckoterminal.com/api/v2",
   HELIUS_API: "https://mainnet.helius-rpc.com",
+  DUNE_API: "https://api.dune.com/api/v1",
+  DUNE_TOKEN_LIST_QUERY_ID: "6575979", // BonkFun tokens with USD1 pairs
   EXCLUDED_SYMBOLS: ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"],
   MAX_MCAP_LIQUIDITY_RATIO: 100,
   MIN_LIQUIDITY_USD: 100,
   CACHE_TTL: 15 * 1000, // 15 seconds for blazing fast updates
   STALE_WHILE_REVALIDATE: 45 * 1000, // Serve stale for 45s while fetching
+  TOKEN_LIST_CACHE_TTL: 6 * 60 * 60 * 1000, // 6 hours for BonkFun token list
   // BonkFun identification - tokens must be created via these programs
   BONKFUN: {
     // Raydium LaunchLab program - creates tokens via initialize_v2
@@ -39,6 +42,85 @@ let cache: CacheEntry = {
   data: [],
   timestamp: 0,
   isRefreshing: false,
+}
+
+// ============================================
+// BONKFUN TOKEN WHITELIST FROM DUNE
+// ============================================
+// Cache for verified BonkFun tokens from Dune query 6575979
+// This is the authoritative list of BonkFun tokens paired with USD1
+let bonkfunWhitelistCache: {
+  tokens: Set<string>
+  timestamp: number
+} | null = null
+
+/**
+ * Fetch the verified BonkFun token whitelist from Dune
+ * This list contains only BonkFun tokens that have traded against USD1
+ */
+async function fetchBonkFunWhitelist(): Promise<Set<string>> {
+  // Check cache first
+  if (bonkfunWhitelistCache && Date.now() - bonkfunWhitelistCache.timestamp < CONFIG.TOKEN_LIST_CACHE_TTL) {
+    return bonkfunWhitelistCache.tokens
+  }
+
+  const duneApiKey = process.env.DUNE_API_KEY
+  if (!duneApiKey) {
+    console.log("[Tokens] No DUNE_API_KEY configured, using pool-type based filtering")
+    return new Set()
+  }
+
+  try {
+    console.log("[Tokens] Fetching BonkFun token whitelist from Dune...")
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+    const response = await fetch(
+      `${CONFIG.DUNE_API}/query/${CONFIG.DUNE_TOKEN_LIST_QUERY_ID}/results?limit=150000`,
+      {
+        signal: controller.signal,
+        headers: {
+          "x-dune-api-key": duneApiKey,
+          Accept: "application/json",
+        },
+      }
+    )
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      console.error("[Tokens] Dune API error:", response.status)
+      return bonkfunWhitelistCache?.tokens || new Set()
+    }
+
+    const data = await response.json()
+
+    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
+      console.error("[Tokens] Dune query not ready or no results")
+      return bonkfunWhitelistCache?.tokens || new Set()
+    }
+
+    const tokens = new Set<string>()
+    for (const row of data.result.rows) {
+      if (row.token_mint) {
+        tokens.add(row.token_mint)
+      }
+    }
+
+    console.log(`[Tokens] Fetched ${tokens.size} verified BonkFun token mints from Dune`)
+
+    // Cache the token list
+    bonkfunWhitelistCache = {
+      tokens,
+      timestamp: Date.now(),
+    }
+
+    return tokens
+  } catch (error) {
+    console.error("[Tokens] Error fetching BonkFun whitelist:", error)
+    return bonkfunWhitelistCache?.tokens || new Set()
+  }
 }
 
 // ============================================
@@ -622,29 +704,42 @@ async function fetchAllTokens(): Promise<any[]> {
   console.log("[API] Starting parallel token fetch (BonkFun tokens only)...")
   const startTime = Date.now()
 
-  // Fetch from all sources in parallel
-  const [raydiumResult, dexScreenerPairs, geckoTerminalPools] = await Promise.all([
+  // Fetch BonkFun whitelist from Dune AND all data sources in parallel
+  const [bonkfunWhitelist, raydiumResult, dexScreenerPairs, geckoTerminalPools] = await Promise.all([
+    fetchBonkFunWhitelist(),
     fetchRaydiumPools(),
     fetchDexScreenerPairs(),
     fetchGeckoTerminalPools(),
   ])
 
   const { pools: raydiumPools, poolTypes } = raydiumResult
+  const useWhitelist = bonkfunWhitelist.size > 0
 
   console.log(
-    `[API] Sources fetched in ${Date.now() - startTime}ms: Raydium=${raydiumPools.size}, DexScreener=${dexScreenerPairs.size}, GeckoTerminal=${geckoTerminalPools.size}`
+    `[API] Sources fetched in ${Date.now() - startTime}ms: Raydium=${raydiumPools.size}, DexScreener=${dexScreenerPairs.size}, GeckoTerminal=${geckoTerminalPools.size}, BonkFunWhitelist=${bonkfunWhitelist.size}`
   )
 
-  // IMPORTANT: Only include tokens that are verified as BonkFun tokens
-  // Primary source of truth: Raydium pools (LaunchLab/CPMM pools)
-  // BonkFun tokens are identified by:
-  // 1. Being in a LaunchLab/CPMM pool type on Raydium (they graduate to these)
-  // 2. Being created via LaunchLab program with BonkFun platform config
+  // IMPORTANT: Only include tokens verified as BonkFun tokens
+  // Primary source of truth: Dune whitelist (verified on-chain BonkFun tokens with USD1 pairs)
+  // Fallback: Raydium pool-type based filtering
 
-  // Start with Raydium pools as the source of truth for BonkFun tokens
-  const bonkFunMints = new Set(raydiumPools.keys())
+  // Filter Raydium pools to only include verified BonkFun tokens
+  const filteredRaydiumPools = new Map<string, any>()
+  for (const [mint, data] of raydiumPools) {
+    if (useWhitelist) {
+      if (bonkfunWhitelist.has(mint)) {
+        filteredRaydiumPools.set(mint, data)
+      }
+    } else {
+      // Fallback: use pool type filtering (already done in fetchRaydiumPools)
+      filteredRaydiumPools.set(mint, data)
+    }
+  }
 
-  // Filter DexScreener and GeckoTerminal to only include tokens found in Raydium BonkFun pools
+  // Get the set of verified BonkFun mints
+  const bonkFunMints = useWhitelist ? bonkfunWhitelist : new Set(filteredRaydiumPools.keys())
+
+  // Filter DexScreener and GeckoTerminal to only include verified BonkFun tokens
   const filteredDexScreenerPairs = new Map<string, any>()
   const filteredGeckoTerminalPools = new Map<string, any>()
 
@@ -660,12 +755,19 @@ async function fetchAllTokens(): Promise<any[]> {
     }
   }
 
-  console.log(
-    `[API] After BonkFun filter: ${bonkFunMints.size} tokens (DexScreener=${filteredDexScreenerPairs.size}, GeckoTerminal=${filteredGeckoTerminalPools.size})`
-  )
+  // Only include mints that have data from at least one source
+  const allMints = new Set<string>()
+  for (const mint of filteredRaydiumPools.keys()) allMints.add(mint)
+  for (const mint of filteredDexScreenerPairs.keys()) {
+    if (bonkFunMints.has(mint)) allMints.add(mint)
+  }
+  for (const mint of filteredGeckoTerminalPools.keys()) {
+    if (bonkFunMints.has(mint)) allMints.add(mint)
+  }
 
-  // Use only BonkFun verified mints
-  const allMints = bonkFunMints
+  console.log(
+    `[API] After BonkFun filter: ${allMints.size} tokens (DexScreener=${filteredDexScreenerPairs.size}, GeckoTerminal=${filteredGeckoTerminalPools.size})`
+  )
 
   // Get detailed data for mints not in DexScreener
   const mintsNeedingData = Array.from(allMints).filter((mint) => !filteredDexScreenerPairs.has(mint))
@@ -673,7 +775,7 @@ async function fetchAllTokens(): Promise<any[]> {
   if (mintsNeedingData.length > 0 && isApiHealthy("dexscreener")) {
     const detailedData = await fetchDexScreenerBatchData(mintsNeedingData)
     for (const [mint, data] of detailedData) {
-      // Only add if it's a BonkFun verified mint
+      // Only add if it's a verified BonkFun mint
       if (bonkFunMints.has(mint)) {
         filteredDexScreenerPairs.set(mint, data)
       }
@@ -685,7 +787,7 @@ async function fetchAllTokens(): Promise<any[]> {
   let id = 0
 
   for (const mint of allMints) {
-    const raydiumData = raydiumPools.get(mint)
+    const raydiumData = filteredRaydiumPools.get(mint)
     const dexData = filteredDexScreenerPairs.get(mint)
     const geckoData = filteredGeckoTerminalPools.get(mint)
 
