@@ -3,10 +3,10 @@
 import { useState, useMemo, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import useSWR from "swr"
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Activity, 
+import {
+  TrendingUp,
+  TrendingDown,
+  Activity,
   BarChart3,
   Clock,
   Zap,
@@ -41,7 +41,7 @@ interface VolumeHistoryResponse {
   cached?: boolean
   synthetic?: boolean
   poolCount?: number
-  ohlcvCoverage?: number // Percentage of volume covered by real OHLCV data
+  ohlcvCoverage?: number
 }
 
 const PERIODS = [
@@ -51,7 +51,12 @@ const PERIODS = [
   { id: "all", label: "ALL" },
 ]
 
-const fetcher = (url: string) => fetch(url).then(res => res.json())
+// Optimized fetcher with error handling
+const fetcher = async (url: string) => {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Failed to fetch volume data')
+  return res.json()
+}
 
 // Yellow candlestick bar chart component
 function VolumeChart({ 
@@ -324,13 +329,28 @@ interface VolumeEvolutionProps {
 
 export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
   const [period, setPeriod] = useState("24h")
-  
+
+  // Optimized SWR configuration for instant loading
   const { data, error, isLoading } = useSWR<VolumeHistoryResponse>(
     `/api/volume-history?period=${period}`,
     fetcher,
     {
-      refreshInterval: 60000, // Refresh every minute
+      // Refresh intervals: 24H needs more frequent updates than historical
+      refreshInterval: period === "24h" ? 60000 : 5 * 60000,
+      // Show stale data while revalidating for instant display
       revalidateOnFocus: false,
+      revalidateOnReconnect: true,
+      // Keep previous data while loading new period
+      keepPreviousData: true,
+      // Dedupe requests within 2 seconds
+      dedupingInterval: 2000,
+      // Error retry with backoff
+      errorRetryCount: 3,
+      errorRetryInterval: 1000,
+      // Use cache immediately if available
+      revalidateIfStale: true,
+      // Focus/reconnect optimizations
+      focusThrottleInterval: 30000,
     }
   )
 
