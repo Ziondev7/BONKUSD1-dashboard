@@ -2,7 +2,7 @@
 
 import { useState, useMemo, memo } from "react"
 import { motion } from "framer-motion"
-import { Trophy, TrendingUp, TrendingDown, Droplets, Zap, ExternalLink, Flame, Crown } from "lucide-react"
+import { Trophy, TrendingUp, TrendingDown, Zap, ExternalLink, Flame, Crown } from "lucide-react"
 import Image from "next/image"
 import type { Token } from "@/lib/types"
 import { formatNumber, generateDeterministicChartData } from "@/lib/utils"
@@ -199,9 +199,9 @@ const PerformerCard = memo(function PerformerCard({
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-[0.15em] text-white/30 mb-1 flex items-center gap-1">
-              <Droplets size={10} /> Liquidity
+              <Zap size={10} /> 24H Volume
             </p>
-            <p className="text-sm font-mono font-medium text-white">{formatNumber(token.liquidity)}</p>
+            <p className="text-sm font-mono font-medium text-white">{formatNumber(token.volume24h)}</p>
           </div>
         </div>
 
