@@ -567,3 +567,40 @@ export async function getDailyVolumeStats(): Promise<{
     newestDate: dailyVolumeMemoryStore[dailyVolumeMemoryStore.length - 1]?.date || null,
   }
 }
+
+/**
+ * Clear all daily volume data (for re-seeding)
+ */
+export async function clearAllDailyVolume(): Promise<boolean> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (datesJson) {
+        const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+        // Delete each date's data
+        for (const date of dates) {
+          try {
+            await kv.set(`${DAILY_VOLUME_KEY}:${date}`, null)
+          } catch {
+            // Ignore individual deletion errors
+          }
+        }
+      }
+
+      // Clear the index
+      await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify([]))
+      console.log("[VolumeStore] Cleared all daily volume data from KV")
+      return true
+    } catch (error) {
+      console.error("[VolumeStore] KV error clearing daily volume:", error)
+    }
+  }
+
+  // Clear memory store
+  dailyVolumeMemoryStore.length = 0
+  return true
+}
