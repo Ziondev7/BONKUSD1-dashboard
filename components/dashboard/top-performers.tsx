@@ -286,11 +286,12 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
               {topGainers.slice(0, 3).map((token, i) => (
                 <div
                   key={`gainer-${token.id}`}
+                  onClick={() => onSelectToken(token)}
                   className="flex items-center gap-4 p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] hover:border-white/[0.08] transition-all cursor-pointer group"
                 >
                   {/* Rank */}
                   <span className={`text-xs font-bold px-2 py-1 rounded font-mono ${
-                    i === 0 
+                    i === 0
                       ? "bg-success/20 text-success"
                       : "bg-white/[0.06] text-white/50"
                   }`}>
@@ -306,6 +307,11 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
                     <p className="text-white/40 text-xs font-mono">${token.symbol}</p>
                   </div>
 
+                  {/* Market Cap */}
+                  <div className="text-xs font-mono text-white/60 hidden sm:block">
+                    {formatNumber(token.mcap)}
+                  </div>
+
                   {/* Change */}
                   <div className={`flex items-center gap-1 text-sm font-mono font-bold text-success`}>
                     <TrendingUp size={14} />
@@ -318,7 +324,7 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover:opacity-100 bg-success/20 text-success hover:bg-success hover:text-black"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-bonk text-black hover:bg-bonk/80"
                   >
                     Trade
                   </a>
@@ -341,11 +347,12 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
               {topLosers.slice(0, 3).map((token, i) => (
                 <div
                   key={`loser-${token.id}`}
+                  onClick={() => onSelectToken(token)}
                   className="flex items-center gap-4 p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] hover:border-white/[0.08] transition-all cursor-pointer group"
                 >
                   {/* Rank */}
                   <span className={`text-xs font-bold px-2 py-1 rounded font-mono ${
-                    i === 0 
+                    i === 0
                       ? "bg-danger/20 text-danger"
                       : "bg-white/[0.06] text-white/50"
                   }`}>
@@ -361,6 +368,11 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
                     <p className="text-white/40 text-xs font-mono">${token.symbol}</p>
                   </div>
 
+                  {/* Market Cap */}
+                  <div className="text-xs font-mono text-white/60 hidden sm:block">
+                    {formatNumber(token.mcap)}
+                  </div>
+
                   {/* Change */}
                   <div className={`flex items-center gap-1 text-sm font-mono font-bold text-danger`}>
                     <TrendingDown size={14} />
@@ -373,7 +385,7 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover:opacity-100 bg-danger/20 text-danger hover:bg-danger hover:text-black"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-bonk text-black hover:bg-bonk/80"
                   >
                     Trade
                   </a>
