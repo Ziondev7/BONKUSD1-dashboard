@@ -40,10 +40,8 @@ interface LaunchpadVolumeResponse {
 }
 
 const PERIODS = [
-  { id: "24h", label: "24H" },
-  { id: "7d", label: "7D" },
-  { id: "1m", label: "1M" },
-  { id: "all", label: "ALL" },
+  { id: "daily", label: "DAILY" },
+  { id: "weekly", label: "WEEKLY" },
 ]
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
@@ -67,11 +65,10 @@ function LaunchpadChart({
   // Format time label based on period
   const formatTimeLabel = (timestamp: number): string => {
     const date = new Date(timestamp)
-    if (period === "24h") {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    } else if (period === "7d") {
-      return date.toLocaleDateString([], { weekday: 'short', hour: '2-digit' })
+    if (period === "daily") {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
     } else {
+      // Weekly - show week start
       return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
     }
   }
@@ -79,19 +76,7 @@ function LaunchpadChart({
   // Get full date string for tooltip
   const getFullDateLabel = (timestamp: number): string => {
     const date = new Date(timestamp)
-    if (period === "24h") {
-      return date.toLocaleString([], {
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } else if (period === "7d") {
-      return date.toLocaleDateString([], {
-        weekday: 'long',
-        month: 'short',
-        day: 'numeric'
-      })
-    } else if (period === "1m") {
+    if (period === "daily") {
       return date.toLocaleDateString([], {
         weekday: 'long',
         month: 'long',
@@ -99,7 +84,7 @@ function LaunchpadChart({
         year: 'numeric'
       })
     } else {
-      // All time - show week starting date
+      // Weekly - show week starting date
       return `Week of ${date.toLocaleDateString([], {
         month: 'short',
         day: 'numeric',
@@ -117,15 +102,11 @@ function LaunchpadChart({
     for (let i = 0; i < data.length; i += step) {
       const date = new Date(data[i].timestamp)
       let label: string
-      if (period === "24h") {
-        label = date.getHours().toString().padStart(2, '0') + ':00'
-      } else if (period === "7d") {
-        label = date.toLocaleDateString([], { weekday: 'short' })
-      } else if (period === "1m") {
+      if (period === "daily") {
         label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
       } else {
-        // All time - show month abbreviation for weekly candles
-        label = date.toLocaleDateString([], { month: 'short' })
+        // Weekly - show month/day
+        label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
       }
       labels.push({ index: i, label })
     }
@@ -252,7 +233,7 @@ function LaunchpadChart({
 }
 
 export function LaunchpadVolume() {
-  const [period, setPeriod] = useState("7d")
+  const [period, setPeriod] = useState("daily")
 
   const { data, error, isLoading } = useSWR<LaunchpadVolumeResponse>(
     `/api/launchpad-volume?period=${period}`,

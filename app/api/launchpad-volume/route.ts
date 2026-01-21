@@ -296,8 +296,8 @@ function processWeeklyData(
 
 /**
  * Main function to fetch Launchpad volume data
- * Uses daily data for 24h, 7d, 1m periods
- * Uses weekly data for ALL period
+ * Uses daily data for "daily" period
+ * Uses weekly data for "weekly" period
  */
 async function fetchLaunchpadVolume(period: string): Promise<{
   data: VolumeDataPoint[]
@@ -307,8 +307,8 @@ async function fetchLaunchpadVolume(period: string): Promise<{
 }> {
   console.log(`[LaunchpadVolume] Fetching Launchpad volume for period: ${period}`)
 
-  // For ALL period, use weekly data
-  if (period === "all") {
+  // For weekly period, use weekly data
+  if (period === "weekly") {
     const weeklyData = await fetchDuneWeeklyVolume()
     if (weeklyData && weeklyData.length > 0) {
       const processed = processWeeklyData(weeklyData)
@@ -317,10 +317,10 @@ async function fetchLaunchpadVolume(period: string): Promise<{
     }
   }
 
-  // For other periods, use daily data
+  // For daily period, use daily data (return all available daily data)
   const dailyData = await fetchDuneDailyVolume()
   if (dailyData && dailyData.length > 0) {
-    const processed = processDailyData(dailyData, period)
+    const processed = processDailyData(dailyData, "all") // Get all daily data
     console.log(`[LaunchpadVolume] Returning ${processed.data.length} daily data points`)
     return { ...processed, source: "dune-daily" }
   }
@@ -384,7 +384,7 @@ function calculateStats(
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const period = url.searchParams.get("period") || "24h"
+  const period = url.searchParams.get("period") || "daily"
 
   // Check cache
   const cached = volumeCache.get(period)
