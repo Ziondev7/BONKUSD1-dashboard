@@ -808,7 +808,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
     "24h": 6,   // Need hourly data, KV has daily - skip to OHLCV
     "7d": 3,    // At least 3 days
     "1m": 7,    // At least a week of data
-    "all": 14,  // Need at least 2 weeks for ALL to show meaningful weekly candles
+    "all": 7,   // Reduced to 7 for ALL - weekly aggregation works with fewer points
   }
   const minRequired = minDataPoints[period] || 3
 
@@ -961,7 +961,8 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       cutoffTime = now - 30 * 24 * 60 * 60 * 1000
       break
     case "all":
-      cutoffTime = new Date("2025-01-01").getTime()
+      // For ALL, go back to the beginning of BonkFun (September 2025)
+      cutoffTime = new Date("2025-09-01").getTime()
       break
     default:
       cutoffTime = now - 24 * 60 * 60 * 1000
@@ -1011,9 +1012,21 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
     }
   }
 
-  // Step 7: Fallback - create realistic distribution from total volume
-  console.log(`[Volume] OHLCV unavailable, creating distribution from Raydium volume`)
+  // Step 7: Fallback - For 24h/7d create distribution, but for 1m/all return empty (don't fake historical data)
+  if (period === "1m" || period === "all") {
+    console.log(`[Volume] Cannot create synthetic historical data for ${period}, returning empty`)
+    return {
+      data: [],
+      synthetic: true,
+      totalVolume24h,
+      poolCount: pools.length,
+      livePoolCount: pools.length,
+      ohlcvCoverage: 0,
+      source: "synthetic",
+    }
+  }
 
+  console.log(`[Volume] OHLCV unavailable, creating distribution from Raydium volume for ${period}`)
   const distributedData = createVolumeDistribution(totalVolume24h, period, pools.length)
 
   return {
