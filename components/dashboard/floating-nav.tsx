@@ -94,7 +94,7 @@ export function FloatingNav({
         }`}
       >
         {/* Top Row: Brand + Metrics + Actions */}
-        <div className="px-4 md:px-6 py-3 flex items-center justify-between border-b border-white/5">
+        <div className={`px-4 md:px-6 py-3 flex items-center justify-between ${!isProMode ? "border-b border-white/5" : ""}`}>
           {/* Left: Brand & Status */}
           <div className="flex items-center gap-4 md:gap-6">
             {/* Logo */}
@@ -266,31 +266,33 @@ export function FloatingNav({
           </div>
         </div>
 
-        {/* Bottom Row: Navigation Tabs */}
-        <div className="px-4 md:px-6 py-2 flex items-center gap-1 overflow-x-auto scrollbar-hide">
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.id
-            const Icon = tab.icon
+        {/* Bottom Row: Navigation Tabs - Hidden in Pro Mode */}
+        {!isProMode && (
+          <div className="px-4 md:px-6 py-2 flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            {TABS.map((tab) => {
+              const isActive = activeTab === tab.id
+              const Icon = tab.icon
 
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  onTabChange(tab.id)
-                  onScrollToContent?.()
-                }}
-                className={`relative px-4 py-2 rounded-lg font-mono text-xs font-bold tracking-wide whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
-                  isActive
-                    ? "bg-bonk text-black shadow-[0_0_20px_rgba(250,204,21,0.3)]"
-                    : "text-white/50 hover:text-white hover:bg-white/[0.04]"
-                }`}
-              >
-                {Icon && <Icon size={14} />}
-                {tab.label}
-              </button>
-            )
-          })}
-        </div>
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    onTabChange(tab.id)
+                    onScrollToContent?.()
+                  }}
+                  className={`relative px-4 py-2 rounded-lg font-mono text-xs font-bold tracking-wide whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                    isActive
+                      ? "bg-bonk text-black shadow-[0_0_20px_rgba(250,204,21,0.3)]"
+                      : "text-white/50 hover:text-white hover:bg-white/[0.04]"
+                  }`}
+                >
+                  {Icon && <Icon size={14} />}
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </motion.div>
     </nav>
   )

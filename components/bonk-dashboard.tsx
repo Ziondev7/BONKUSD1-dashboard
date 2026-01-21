@@ -335,7 +335,7 @@ export function BonkDashboard() {
 
       {/* Main Content - Pro Mode (Bloomberg-style grid layout) */}
       {isProMode && (
-        <main className="relative z-10 h-[calc(100vh-120px)] mt-[120px] px-2 pb-2">
+        <main className="relative z-10 h-[calc(100vh-80px)] mt-[80px] px-2 pb-2">
           <ErrorBoundary>
             <motion.div
               initial={{ opacity: 0 }}
