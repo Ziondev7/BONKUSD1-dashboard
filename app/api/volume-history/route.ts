@@ -22,8 +22,8 @@ const TOKEN_LIST_CACHE_TTL = 6 * 60 * 60 * 1000
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
 const DUNE_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for Dune data (fallback only)
-const OHLCV_BATCH_SIZE = 5 // Fetch OHLCV for top 5 pools per batch (rate limit friendly)
-const MAX_OHLCV_POOLS = 30 // Maximum pools to fetch OHLCV from
+const OHLCV_BATCH_SIZE = 10 // Fetch OHLCV for top 10 pools per batch
+const MAX_OHLCV_POOLS = 50 // Maximum pools to fetch OHLCV from for better coverage
 
 // ============================================
 // TYPES
@@ -496,6 +496,8 @@ async function fetchBatchedOHLCV(
   aggregate: number = 1
 ): Promise<Map<number, { volume: number; pools: number }>> {
   const volumeByTimestamp = new Map<number, { volume: number; pools: number }>()
+  let successfulPools = 0
+  let failedPools = 0
 
   // Process in batches to respect rate limits
   for (let i = 0; i < poolAddresses.length; i += OHLCV_BATCH_SIZE) {
@@ -506,16 +508,24 @@ async function fetchBatchedOHLCV(
         const url = `${GECKOTERMINAL_API}/networks/solana/pools/${poolAddr}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=1000`
         const response = await fetchWithTimeout(url, 8000)
 
-        if (!response.ok) return []
+        if (!response.ok) {
+          failedPools++
+          return []
+        }
 
         const data = await response.json()
         const ohlcvList = data.data?.attributes?.ohlcv_list || []
+
+        if (ohlcvList.length > 0) {
+          successfulPools++
+        }
 
         return ohlcvList.map((candle: number[]) => ({
           timestamp: candle[0] * 1000,
           volume: candle[5] || 0,
         }))
       } catch {
+        failedPools++
         return []
       }
     })
@@ -540,6 +550,8 @@ async function fetchBatchedOHLCV(
       await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
+
+  console.log(`[Volume] OHLCV fetch: ${successfulPools} pools with data, ${failedPools} failed, ${volumeByTimestamp.size} unique timestamps`)
 
   return volumeByTimestamp
 }
