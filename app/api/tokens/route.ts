@@ -527,15 +527,47 @@ const holderCountCache = new Map<string, { holders: number; timestamp: number }>
 const HOLDER_CACHE_TTL = 30 * 60 * 1000 // 30 minutes (holder counts don't change rapidly)
 
 /**
- * Fetch holder count using Solana RPC getProgramAccounts via Helius (FREE)
- * Counts all token accounts for a specific mint address
+ * Fetch holder count from Solscan Pro API (most accurate)
+ * Requires SOLSCAN_API_KEY - get free key at https://pro-api.solscan.io/
  */
-async function fetchHolderCount(mint: string): Promise<number> {
+async function fetchHolderCountFromSolscan(mint: string): Promise<number> {
+  const apiKey = process.env.SOLSCAN_API_KEY
+  if (!apiKey) return 0
+
+  try {
+    const response = await fetch(
+      `https://pro-api.solscan.io/v2.0/token/holders?address=${mint}&page=1&page_size=1`,
+      {
+        headers: {
+          "token": apiKey,
+          "Accept": "application/json",
+        },
+      }
+    )
+
+    if (response.ok) {
+      const data = await response.json()
+      // Solscan returns { success: true, data: { total: number, items: [...] } }
+      if (data.success && data.data?.total !== undefined) {
+        console.log(`[Solscan] ${mint.slice(0, 8)}... holders: ${data.data.total}`)
+        return data.data.total
+      }
+    }
+  } catch (err) {
+    console.log(`[Solscan] Error for ${mint.slice(0, 8)}...:`, err)
+  }
+  return 0
+}
+
+/**
+ * Fetch holder count using Solana RPC getProgramAccounts via Helius (FREE fallback)
+ * Note: This counts all token accounts, may include zero-balance accounts
+ */
+async function fetchHolderCountFromHelius(mint: string): Promise<number> {
   const apiKey = process.env.HELIUS_API_KEY
   if (!apiKey) return 0
 
   try {
-    // Use standard Solana RPC getProgramAccounts to count token holders
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -544,13 +576,13 @@ async function fetchHolderCount(mint: string): Promise<number> {
         id: mint,
         method: "getProgramAccounts",
         params: [
-          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // SPL Token Program
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
           {
             encoding: "base64",
-            dataSlice: { offset: 0, length: 0 }, // Don't fetch data, just count
+            dataSlice: { offset: 0, length: 0 },
             filters: [
-              { dataSize: 165 }, // SPL Token account size
-              { memcmp: { offset: 0, bytes: mint } } // Filter by mint address
+              { dataSize: 165 },
+              { memcmp: { offset: 0, bytes: mint } }
             ]
           }
         ]
@@ -564,14 +596,25 @@ async function fetchHolderCount(mint: string): Promise<number> {
         console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${holderCount}`)
         return holderCount
       }
-      if (data.error) {
-        console.log(`[Helius] ${mint.slice(0, 8)}... error: ${data.error.message}`)
-      }
     }
   } catch (err) {
     console.log(`[Helius] Error for ${mint.slice(0, 8)}...:`, err)
   }
   return 0
+}
+
+/**
+ * Fetch holder count - tries Solscan first (accurate), falls back to Helius
+ */
+async function fetchHolderCount(mint: string): Promise<number> {
+  // Try Solscan first if API key is available (most accurate)
+  if (process.env.SOLSCAN_API_KEY) {
+    const holders = await fetchHolderCountFromSolscan(mint)
+    if (holders > 0) return holders
+  }
+
+  // Fallback to Helius (free but may be slightly less accurate)
+  return fetchHolderCountFromHelius(mint)
 }
 
 /**
