@@ -8,8 +8,11 @@ const DUNE_DAILY_QUERY_ID = "5440992"  // Daily Launchpad volume
 const DUNE_WEEKLY_QUERY_ID = "5468582" // Weekly Launchpad volume
 
 // Cache configuration
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache
-const DUNE_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for Dune data
+const CACHE_TTL = 5 * 60 * 1000 // 5 minutes for in-memory response cache
+const KV_CACHE_TTL = 6 * 60 * 60 * 1000 // 6 hours for KV cache (data is historical)
+const STALE_DATA_TTL = 24 * 60 * 60 * 1000 // 24 hours - return stale data if nothing else works
+const POLL_INTERVAL = 2000 // 2 seconds between poll attempts
+const MAX_POLL_ATTEMPTS = 15 // 30 seconds max polling
 
 // Category colors for stacked chart
 const CATEGORIES = ["pumpdotfun", "bonk", "moonshot", "bags", "believe"] as const
@@ -54,28 +57,79 @@ interface CacheEntry {
   source: "dune-daily" | "dune-weekly"
 }
 
+// KV client interface
+interface KVClient {
+  set: (key: string, value: unknown) => Promise<string | null>
+  get: (key: string) => Promise<unknown | null>
+}
+
 // ============================================
-// IN-MEMORY CACHE
+// IN-MEMORY CACHE (short-term, per-instance)
 // ============================================
 const volumeCache: Map<string, CacheEntry> = new Map()
 
-// Separate caches for daily and weekly Dune data (raw data)
-let duneDailyCache: {
-  data: DuneRow[]
-  timestamp: number
-} | null = null
+// ============================================
+// VERCEL KV STORAGE (long-term, persistent)
+// ============================================
+async function getKV(): Promise<KVClient | null> {
+  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+    return null
+  }
 
-let duneWeeklyCache: {
-  data: DuneRow[]
-  timestamp: number
-} | null = null
+  try {
+    const module = await import("@vercel/kv")
+    return module.kv as KVClient
+  } catch (e) {
+    console.error("[LaunchpadVolume] Failed to load @vercel/kv:", e)
+    return null
+  }
+}
+
+const KV_LAUNCHPAD_KEY = "launchpad:volume"
+
+/**
+ * Save launchpad data to KV storage
+ */
+async function saveToKV(period: string, entry: CacheEntry): Promise<void> {
+  const kv = await getKV()
+  if (!kv) return
+
+  try {
+    const key = `${KV_LAUNCHPAD_KEY}:${period}`
+    await kv.set(key, JSON.stringify(entry))
+    console.log(`[LaunchpadVolume] Saved ${period} data to KV (${entry.data.length} points)`)
+  } catch (error) {
+    console.error("[LaunchpadVolume] KV save error:", error)
+  }
+}
+
+/**
+ * Load launchpad data from KV storage
+ */
+async function loadFromKV(period: string): Promise<CacheEntry | null> {
+  const kv = await getKV()
+  if (!kv) return null
+
+  try {
+    const key = `${KV_LAUNCHPAD_KEY}:${period}`
+    const data = await kv.get(key)
+    if (data) {
+      const entry = typeof data === "string" ? JSON.parse(data) : data as CacheEntry
+      console.log(`[LaunchpadVolume] Loaded ${period} data from KV (${entry.data.length} points, age: ${Math.round((Date.now() - entry.timestamp) / 60000)}min)`)
+      return entry
+    }
+  } catch (error) {
+    console.error("[LaunchpadVolume] KV load error:", error)
+  }
+  return null
+}
 
 // ============================================
-// DUNE API FETCHERS
+// DUNE API FETCHERS (with polling)
 // ============================================
 
 /**
- * Execute a Dune query to refresh its results
+ * Execute a Dune query and return execution ID
  */
 async function executeDuneQuery(queryId: string, duneApiKey: string): Promise<string | null> {
   try {
@@ -93,7 +147,8 @@ async function executeDuneQuery(queryId: string, duneApiKey: string): Promise<st
     )
 
     if (!response.ok) {
-      console.error(`[LaunchpadVolume] Failed to execute query ${queryId}:`, response.status)
+      const errorText = await response.text()
+      console.error(`[LaunchpadVolume] Failed to execute query ${queryId}:`, response.status, errorText)
       return null
     }
 
@@ -107,86 +162,60 @@ async function executeDuneQuery(queryId: string, duneApiKey: string): Promise<st
 }
 
 /**
- * Fetch daily volume data from Dune Analytics (query 5440992)
- * Returns ALL categories for stacked chart
+ * Poll for execution results
  */
-async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
-  // Check cache first
-  if (duneDailyCache && Date.now() - duneDailyCache.timestamp < DUNE_CACHE_TTL) {
-    console.log("[LaunchpadVolume] Using cached daily Dune data")
-    return duneDailyCache.data
-  }
+async function pollExecutionResults(executionId: string, duneApiKey: string): Promise<DuneRow[] | null> {
+  for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+    try {
+      console.log(`[LaunchpadVolume] Polling execution ${executionId} (attempt ${attempt + 1}/${MAX_POLL_ATTEMPTS})...`)
 
-  const duneApiKey = process.env.DUNE_API_KEY
-  if (!duneApiKey) {
-    console.log("[LaunchpadVolume] No DUNE_API_KEY configured")
-    return null
-  }
+      const response = await fetch(
+        `${DUNE_API}/execution/${executionId}/results`,
+        {
+          headers: {
+            "x-dune-api-key": duneApiKey,
+            Accept: "application/json",
+          },
+        }
+      )
 
-  try {
-    console.log("[LaunchpadVolume] Fetching daily data from Dune...")
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 15000)
-
-    const response = await fetch(
-      `${DUNE_API}/query/${DUNE_DAILY_QUERY_ID}/results?limit=2000`,
-      {
-        signal: controller.signal,
-        headers: {
-          "x-dune-api-key": duneApiKey,
-          Accept: "application/json",
-        },
+      if (!response.ok) {
+        console.error(`[LaunchpadVolume] Poll error:`, response.status)
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL))
+        continue
       }
-    )
 
-    clearTimeout(timeoutId)
+      const data: DuneApiResponse = await response.json()
 
-    if (!response.ok) {
-      console.error("[LaunchpadVolume] Dune daily API error:", response.status)
-      // Try to execute the query to refresh it
-      await executeDuneQuery(DUNE_DAILY_QUERY_ID, duneApiKey)
-      return null
-    }
-
-    const data: DuneApiResponse = await response.json()
-
-    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
-      console.error("[LaunchpadVolume] Dune daily query state:", data.state, "rows:", data.result?.rows?.length || 0)
-      // Try to execute the query to refresh it
-      if (data.state === "QUERY_STATE_EXPIRED" || !data.result?.rows) {
-        await executeDuneQuery(DUNE_DAILY_QUERY_ID, duneApiKey)
+      if (data.state === "QUERY_STATE_COMPLETED" && data.result?.rows) {
+        console.log(`[LaunchpadVolume] Execution complete! Got ${data.result.rows.length} rows`)
+        return data.result.rows
       }
-      return null
+
+      if (data.state === "QUERY_STATE_FAILED") {
+        console.error(`[LaunchpadVolume] Query execution failed`)
+        return null
+      }
+
+      // Still pending, wait and retry
+      console.log(`[LaunchpadVolume] Query state: ${data.state}, waiting...`)
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL))
+    } catch (error) {
+      console.error(`[LaunchpadVolume] Poll error:`, error)
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL))
     }
-
-    const rows = data.result.rows
-    console.log(`[LaunchpadVolume] Fetched ${rows.length} daily rows from Dune`)
-
-    // Cache the data
-    duneDailyCache = {
-      data: rows,
-      timestamp: Date.now(),
-    }
-
-    return rows
-  } catch (error) {
-    console.error("[LaunchpadVolume] Error fetching daily from Dune:", error)
-    return null
   }
+
+  console.error(`[LaunchpadVolume] Polling timed out after ${MAX_POLL_ATTEMPTS} attempts`)
+  return null
 }
 
 /**
- * Fetch weekly volume data from Dune Analytics (query 5468582)
- * Returns ALL categories for stacked chart
+ * Fetch data from Dune with full retry logic:
+ * 1. Try to get cached results
+ * 2. If expired/failed, execute query and poll for results
  */
-async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
-  // Check cache first
-  if (duneWeeklyCache && Date.now() - duneWeeklyCache.timestamp < DUNE_CACHE_TTL) {
-    console.log("[LaunchpadVolume] Using cached weekly Dune data")
-    return duneWeeklyCache.data
-  }
-
+async function fetchDuneData(queryId: string, queryName: string): Promise<DuneRow[] | null> {
   const duneApiKey = process.env.DUNE_API_KEY
   if (!duneApiKey) {
     console.log("[LaunchpadVolume] No DUNE_API_KEY configured")
@@ -194,13 +223,14 @@ async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
   }
 
   try {
-    console.log("[LaunchpadVolume] Fetching weekly data from Dune...")
+    // First, try to get existing results
+    console.log(`[LaunchpadVolume] Fetching ${queryName} data from Dune...`)
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 15000)
 
     const response = await fetch(
-      `${DUNE_API}/query/${DUNE_WEEKLY_QUERY_ID}/results?limit=1000`,
+      `${DUNE_API}/query/${queryId}/results?limit=2000`,
       {
         signal: controller.signal,
         headers: {
@@ -212,30 +242,32 @@ async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
 
     clearTimeout(timeoutId)
 
-    if (!response.ok) {
-      console.error("[LaunchpadVolume] Dune weekly API error:", response.status)
-      return null
+    if (response.ok) {
+      const data: DuneApiResponse = await response.json()
+
+      if (data.state === "QUERY_STATE_COMPLETED" && data.result?.rows?.length > 0) {
+        console.log(`[LaunchpadVolume] Got ${data.result.rows.length} ${queryName} rows from cached results`)
+        return data.result.rows
+      }
+
+      // Results expired or empty - need to execute
+      console.log(`[LaunchpadVolume] ${queryName} query state: ${data.state}, rows: ${data.result?.rows?.length || 0}`)
+    } else {
+      console.error(`[LaunchpadVolume] ${queryName} API error:`, response.status)
     }
 
-    const data: DuneApiResponse = await response.json()
-
-    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
-      console.error("[LaunchpadVolume] Dune weekly query not ready or no results")
-      return null
+    // Execute query and poll for results
+    const executionId = await executeDuneQuery(queryId, duneApiKey)
+    if (executionId) {
+      const rows = await pollExecutionResults(executionId, duneApiKey)
+      if (rows && rows.length > 0) {
+        return rows
+      }
     }
 
-    const rows = data.result.rows
-    console.log(`[LaunchpadVolume] Fetched ${rows.length} weekly rows from Dune`)
-
-    // Cache the data
-    duneWeeklyCache = {
-      data: rows,
-      timestamp: Date.now(),
-    }
-
-    return rows
+    return null
   } catch (error) {
-    console.error("[LaunchpadVolume] Error fetching weekly from Dune:", error)
+    console.error(`[LaunchpadVolume] Error fetching ${queryName} from Dune:`, error)
     return null
   }
 }
@@ -246,7 +278,6 @@ async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
 
 /**
  * Process raw Dune data into stacked volume data points
- * Groups data by timestamp and includes volume for each category
  */
 function processStackedData(
   rows: DuneRow[],
@@ -316,46 +347,83 @@ function processStackedData(
 
 /**
  * Main function to fetch Launchpad volume data
+ * Implements stale-while-revalidate pattern
  */
 async function fetchLaunchpadVolume(period: string): Promise<{
   data: StackedVolumeDataPoint[]
   totalVolume: number
   categoryTotals: Record<Category, number>
   source: "dune-daily" | "dune-weekly"
+  fromCache: boolean
+  cacheAge?: number
 }> {
   console.log(`[LaunchpadVolume] Fetching Launchpad volume for period: ${period}`)
 
-  // For weekly period, use weekly data only
-  if (period === "weekly") {
-    const weeklyData = await fetchDuneWeeklyVolume()
-    if (weeklyData && weeklyData.length > 0) {
-      const processed = processStackedData(weeklyData, true)
-      return { ...processed, source: "dune-weekly" }
-    }
-    // Weekly not available
-    console.log("[LaunchpadVolume] Weekly data not available")
+  const isWeekly = period === "weekly"
+  const queryId = isWeekly ? DUNE_WEEKLY_QUERY_ID : DUNE_DAILY_QUERY_ID
+  const source = isWeekly ? "dune-weekly" : "dune-daily"
+  const queryName = isWeekly ? "weekly" : "daily"
+
+  // Check KV cache first
+  const kvCached = await loadFromKV(period)
+  const kvAge = kvCached ? Date.now() - kvCached.timestamp : Infinity
+
+  // If KV cache is fresh (< 6 hours), use it
+  if (kvCached && kvAge < KV_CACHE_TTL) {
+    console.log(`[LaunchpadVolume] Using fresh KV cache for ${period} (age: ${Math.round(kvAge / 60000)}min)`)
     return {
-      data: [],
-      totalVolume: 0,
-      categoryTotals: { pumpdotfun: 0, bonk: 0, moonshot: 0, bags: 0, believe: 0 },
-      source: "dune-weekly"
+      data: kvCached.data,
+      totalVolume: kvCached.totalVolume,
+      categoryTotals: kvCached.categoryTotals,
+      source: kvCached.source,
+      fromCache: true,
+      cacheAge: kvAge,
     }
   }
 
-  // For daily period, use daily data only - NO FALLBACK to weekly
-  const dailyData = await fetchDuneDailyVolume()
-  if (dailyData && dailyData.length > 0) {
-    const processed = processStackedData(dailyData, false)
-    return { ...processed, source: "dune-daily" }
+  // Try to fetch fresh data from Dune
+  const duneRows = await fetchDuneData(queryId, queryName)
+
+  if (duneRows && duneRows.length > 0) {
+    const processed = processStackedData(duneRows, isWeekly)
+
+    // Save to KV for persistence
+    const entry: CacheEntry = {
+      ...processed,
+      timestamp: Date.now(),
+      period,
+      source,
+    }
+    await saveToKV(period, entry)
+
+    return {
+      ...processed,
+      source,
+      fromCache: false,
+    }
   }
 
-  // Daily not available - don't fall back to weekly (they show different granularity)
-  console.log("[LaunchpadVolume] Daily data not available from Dune")
+  // Dune failed - use stale KV cache if available (up to 24 hours old)
+  if (kvCached && kvAge < STALE_DATA_TTL) {
+    console.log(`[LaunchpadVolume] Using stale KV cache for ${period} (age: ${Math.round(kvAge / 60000)}min)`)
+    return {
+      data: kvCached.data,
+      totalVolume: kvCached.totalVolume,
+      categoryTotals: kvCached.categoryTotals,
+      source: kvCached.source,
+      fromCache: true,
+      cacheAge: kvAge,
+    }
+  }
+
+  // Nothing available
+  console.log(`[LaunchpadVolume] No data available for ${period}`)
   return {
     data: [],
     totalVolume: 0,
     categoryTotals: { pumpdotfun: 0, bonk: 0, moonshot: 0, bags: 0, believe: 0 },
-    source: "dune-daily"
+    source,
+    fromCache: false,
   }
 }
 
@@ -405,10 +473,11 @@ function calculateStats(
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const period = url.searchParams.get("period") || "daily"
+  const forceRefresh = url.searchParams.get("refresh") === "true"
 
-  // Check cache
+  // Check in-memory cache (short TTL for same-instance requests)
   const cached = volumeCache.get(period)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (!forceRefresh && cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return NextResponse.json({
       history: cached.data,
       stats: calculateStats(cached.data, cached.totalVolume, cached.categoryTotals),
@@ -420,10 +489,10 @@ export async function GET(request: Request) {
     })
   }
 
-  // Fetch fresh data
-  const { data, totalVolume, categoryTotals, source } = await fetchLaunchpadVolume(period)
+  // Fetch data (will use KV cache or Dune with stale-while-revalidate)
+  const { data, totalVolume, categoryTotals, source, fromCache, cacheAge } = await fetchLaunchpadVolume(period)
 
-  // Update cache
+  // Update in-memory cache
   volumeCache.set(period, {
     data,
     timestamp: Date.now(),
@@ -438,7 +507,8 @@ export async function GET(request: Request) {
     stats: calculateStats(data, totalVolume, categoryTotals),
     period,
     dataPoints: data.length,
-    cached: false,
+    cached: fromCache,
+    cacheAge: cacheAge ? Math.round(cacheAge / 60000) : undefined, // in minutes
     categories: CATEGORIES,
     source,
   })
