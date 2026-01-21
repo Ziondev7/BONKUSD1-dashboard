@@ -30,6 +30,10 @@ export interface Token {
   prevPrice?: number
   priceDirection?: 'up' | 'down' | 'neutral'
   lastUpdate?: number
+  // High-precision price storage (for very small memecoin prices)
+  // The numeric 'price' field may lose precision for values < 1e-15
+  // Use priceRaw when maximum precision is needed
+  priceRaw?: string
 }
 
 export interface Transaction {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { fetchBonkFunWhitelist, getWhitelistStatus } from "@/lib/bonkfun-verification"
 
 // ============================================
 // CONFIGURATION
@@ -9,21 +10,11 @@ const CONFIG = {
   DEXSCREENER_API: "https://api.dexscreener.com",
   RAYDIUM_API: "https://api-v3.raydium.io",
   GECKOTERMINAL_API: "https://api.geckoterminal.com/api/v2",
-  HELIUS_API: "https://mainnet.helius-rpc.com",
   EXCLUDED_SYMBOLS: ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"],
   MAX_MCAP_LIQUIDITY_RATIO: 100,
   MIN_LIQUIDITY_USD: 100,
   CACHE_TTL: 15 * 1000, // 15 seconds for blazing fast updates
   STALE_WHILE_REVALIDATE: 45 * 1000, // Serve stale for 45s while fetching
-  // BonkFun identification - tokens must be created via these programs
-  BONKFUN: {
-    // Raydium LaunchLab program - creates tokens via initialize_v2
-    LAUNCHLAB_PROGRAM: "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
-    // BonkFun platform config - must be in accounts to identify BonkFun vs other LaunchLab
-    PLATFORM_CONFIG: "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1",
-    // BonkFun graduation program
-    GRADUATE_PROGRAM: "boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4",
-  },
 }
 
 // ============================================
@@ -41,13 +32,8 @@ let cache: CacheEntry = {
   isRefreshing: false,
 }
 
-// ============================================
-// BONKFUN TOKEN VERIFICATION CACHE
-// ============================================
-// Cache verified BonkFun tokens to avoid repeated lookups
-// Key: token mint address, Value: { isBonkFun: boolean, verifiedAt: timestamp }
-const bonkfunVerificationCache = new Map<string, { isBonkFun: boolean; verifiedAt: number }>()
-const VERIFICATION_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours - token origin doesn't change
+// BonkFun whitelist is now managed by lib/bonkfun-verification.ts
+// This provides a single source of truth using Dune Analytics data
 
 // API health tracking with exponential backoff
 const apiHealth = {
@@ -88,94 +74,8 @@ function shouldExclude(symbol?: string, name?: string): boolean {
   )
 }
 
-// ============================================
-// BONKFUN TOKEN VERIFICATION
-// ============================================
-
-/**
- * Verify if a token was created on BonkFun by checking its creation transaction.
- * BonkFun tokens are created via LaunchLab program with BonkFun platform config in accounts.
- */
-async function verifyBonkFunToken(mint: string): Promise<boolean> {
-  // Check cache first
-  const cached = bonkfunVerificationCache.get(mint)
-  if (cached && Date.now() - cached.verifiedAt < VERIFICATION_CACHE_TTL) {
-    return cached.isBonkFun
-  }
-
-  try {
-    // Use Helius API to get transaction signatures for the token mint
-    const apiKey = process.env.HELIUS_API_KEY || ""
-    const url = apiKey
-      ? `${CONFIG.HELIUS_API}/?api-key=${apiKey}`
-      : CONFIG.HELIUS_API
-
-    // Get the token's first transactions to find creation
-    const response = await fetchWithTimeout(url, 5000)
-    if (!response.ok) {
-      // If API fails, check by pool type from Raydium (fallback)
-      return true // Default to true if can't verify - will be filtered by pool type
-    }
-
-    // For now, use a simpler approach: check if the pool type indicates LaunchLab
-    // This is a fallback since proper verification requires parsing transaction history
-    bonkfunVerificationCache.set(mint, { isBonkFun: true, verifiedAt: Date.now() })
-    return true
-  } catch (error) {
-    console.error(`[BonkFun] Verification error for ${mint}:`, error)
-    return true // Default to true on error
-  }
-}
-
-/**
- * Check if a pool type indicates it's from LaunchLab/BonkFun
- * Raydium pool types that indicate LaunchLab origin
- */
-function isLaunchLabPoolType(poolType?: string): boolean {
-  if (!poolType) return false
-  const type = poolType.toLowerCase()
-  return type.includes("launchlab") ||
-         type.includes("launch") ||
-         type === "cpmm" || // LaunchLab migrates to CPMM pools
-         type === "standard" // Standard CPMM pools from LaunchLab
-}
-
-/**
- * Batch verify multiple tokens for BonkFun origin
- * Uses pool type as primary filter, with option for deeper verification
- */
-async function filterBonkFunTokens(
-  tokens: Map<string, any>,
-  poolTypes: Map<string, string>
-): Promise<Set<string>> {
-  const verifiedMints = new Set<string>()
-
-  for (const [mint, data] of tokens) {
-    const poolType = poolTypes.get(mint) || data.poolType
-
-    // Primary filter: Check if pool type indicates LaunchLab/BonkFun origin
-    if (isLaunchLabPoolType(poolType)) {
-      verifiedMints.add(mint)
-      bonkfunVerificationCache.set(mint, { isBonkFun: true, verifiedAt: Date.now() })
-      continue
-    }
-
-    // Check cache for previously verified tokens
-    const cached = bonkfunVerificationCache.get(mint)
-    if (cached && Date.now() - cached.verifiedAt < VERIFICATION_CACHE_TTL) {
-      if (cached.isBonkFun) {
-        verifiedMints.add(mint)
-      }
-      continue
-    }
-
-    // For tokens without clear pool type, mark as unverified
-    // They won't be included unless verified via another method
-    bonkfunVerificationCache.set(mint, { isBonkFun: false, verifiedAt: Date.now() })
-  }
-
-  return verifiedMints
-}
+// BonkFun token verification is now handled by lib/bonkfun-verification.ts
+// which uses the authoritative Dune Analytics whitelist
 
 function hasSuspiciousMetrics(fdv: number, liquidity: number): boolean {
   if (liquidity < CONFIG.MIN_LIQUIDITY_USD) return true
@@ -213,11 +113,11 @@ async function fetchRaydiumPools(): Promise<{ pools: Map<string, any>; poolTypes
     const pageSize = 500
     const maxPages = 5
 
-    // OPTIMIZATION: Fetch first page to get total count, then parallelize remaining pages
-    // Filter for CPMM and LaunchLab pool types (where BonkFun tokens graduate to)
+    // Fetch first page to get total count, then parallelize remaining pages
+    // We fetch ALL USD1 pools - BonkFun filtering happens later via whitelist
     const firstPageUrl = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
     const firstResponse = await fetchWithTimeout(firstPageUrl)
-    
+
     if (!firstResponse.ok) {
       if (firstResponse.status === 429) markApiError("raydium")
       return { pools: poolMap, poolTypes: poolTypeMap }
@@ -230,7 +130,7 @@ async function fetchRaydiumPools(): Promise<{ pools: Map<string, any>; poolTypes
     const totalCount = firstJson.data.count || firstPools.length
     const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
 
-    // Process first page
+    // Process pool - collects ALL USD1 pools, BonkFun filtering happens in fetchAllTokens
     const processPool = (pool: any) => {
       const mintA = pool.mintA?.address
       const mintB = pool.mintB?.address
@@ -245,24 +145,14 @@ async function fetchRaydiumPools(): Promise<{ pools: Map<string, any>; poolTypes
       if (!baseMint || baseMint === CONFIG.USD1_MINT) return
       if (shouldExclude(baseToken?.symbol, baseToken?.name)) return
 
-      // Track pool type for BonkFun verification
+      // Track pool type for informational purposes
       const poolType = pool.type || pool.poolType || ""
       poolTypeMap.set(baseMint, poolType)
-
-      // BonkFun tokens graduate to CPMM pools - filter for LaunchLab/CPMM pools
-      // Include: Cpmm, Standard, LaunchLab variants
-      // Note: Some older BonkFun tokens may have graduated to AMM v4 pools
-      const isLikelyBonkFun = isLaunchLabPoolType(poolType) ||
-                              poolType.toLowerCase().includes("cpmm") ||
-                              poolType.toLowerCase() === "standard" ||
-                              poolType.toLowerCase() === "concentrated" ||
-                              pool.programId === CONFIG.BONKFUN.LAUNCHLAB_PROGRAM
-
-      if (!isLikelyBonkFun) return // Skip non-BonkFun pools
 
       const existing = poolMap.get(baseMint)
       const poolLiquidity = pool.tvl || 0
 
+      // Keep the pool with highest liquidity for each token
       if (!existing || poolLiquidity > (existing.tvl || 0)) {
         poolMap.set(baseMint, {
           mint: baseMint,
@@ -277,14 +167,14 @@ async function fetchRaydiumPools(): Promise<{ pools: Map<string, any>; poolTypes
           price: isAUSD1 ? pool.price : 1 / pool.price,
           priceChange24h: pool.day?.priceChange || 0,
           source: "raydium",
-          isBonkFun: true, // Mark as verified BonkFun token
+          // Note: isBonkFun will be set later after whitelist verification
         })
       }
     }
 
     firstPools.forEach(processPool)
 
-    // OPTIMIZATION: Fetch remaining pages in parallel
+    // Fetch remaining pages in parallel
     if (totalPages > 1 && firstPools.length >= pageSize) {
       const pagePromises = []
       for (let page = 2; page <= totalPages; page++) {
@@ -305,6 +195,7 @@ async function fetchRaydiumPools(): Promise<{ pools: Map<string, any>; poolTypes
     }
 
     resetApiHealth("raydium")
+    console.log(`[Raydium] Fetched ${poolMap.size} USD1 pools (pending BonkFun verification)`)
   } catch (error) {
     console.error("[Raydium] Error:", error)
     markApiError("raydium")
@@ -622,29 +513,43 @@ async function fetchAllTokens(): Promise<any[]> {
   console.log("[API] Starting parallel token fetch (BonkFun tokens only)...")
   const startTime = Date.now()
 
-  // Fetch from all sources in parallel
-  const [raydiumResult, dexScreenerPairs, geckoTerminalPools] = await Promise.all([
+  // Fetch BonkFun whitelist and all data sources in parallel
+  const [bonkFunWhitelist, raydiumResult, dexScreenerPairs, geckoTerminalPools] = await Promise.all([
+    fetchBonkFunWhitelist(),
     fetchRaydiumPools(),
     fetchDexScreenerPairs(),
     fetchGeckoTerminalPools(),
   ])
 
   const { pools: raydiumPools, poolTypes } = raydiumResult
+  const whitelistStatus = getWhitelistStatus()
 
   console.log(
-    `[API] Sources fetched in ${Date.now() - startTime}ms: Raydium=${raydiumPools.size}, DexScreener=${dexScreenerPairs.size}, GeckoTerminal=${geckoTerminalPools.size}`
+    `[API] Sources fetched in ${Date.now() - startTime}ms: ` +
+    `Raydium=${raydiumPools.size}, DexScreener=${dexScreenerPairs.size}, ` +
+    `GeckoTerminal=${geckoTerminalPools.size}, BonkFun Whitelist=${bonkFunWhitelist.size}`
   )
 
-  // IMPORTANT: Only include tokens that are verified as BonkFun tokens
-  // Primary source of truth: Raydium pools (LaunchLab/CPMM pools)
-  // BonkFun tokens are identified by:
-  // 1. Being in a LaunchLab/CPMM pool type on Raydium (they graduate to these)
-  // 2. Being created via LaunchLab program with BonkFun platform config
+  // CRITICAL: Use Dune whitelist as the authoritative source of truth
+  // Only include tokens that are verified BonkFun tokens
+  if (bonkFunWhitelist.size === 0) {
+    console.warn("[API] BonkFun whitelist unavailable - returning empty results (strict mode)")
+    console.warn("[API] Ensure DUNE_API_KEY is configured for production use")
+    return []
+  }
 
-  // Start with Raydium pools as the source of truth for BonkFun tokens
-  const bonkFunMints = new Set(raydiumPools.keys())
+  // Filter Raydium pools to only verified BonkFun tokens
+  const verifiedRaydiumPools = new Map<string, any>()
+  for (const [mint, data] of raydiumPools) {
+    if (bonkFunWhitelist.has(mint)) {
+      verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true })
+    }
+  }
 
-  // Filter DexScreener and GeckoTerminal to only include tokens found in Raydium BonkFun pools
+  // The verified BonkFun mints from Raydium pools
+  const bonkFunMints = new Set(verifiedRaydiumPools.keys())
+
+  // Filter DexScreener and GeckoTerminal to only verified BonkFun tokens
   const filteredDexScreenerPairs = new Map<string, any>()
   const filteredGeckoTerminalPools = new Map<string, any>()
 
@@ -661,10 +566,11 @@ async function fetchAllTokens(): Promise<any[]> {
   }
 
   console.log(
-    `[API] After BonkFun filter: ${bonkFunMints.size} tokens (DexScreener=${filteredDexScreenerPairs.size}, GeckoTerminal=${filteredGeckoTerminalPools.size})`
+    `[API] After BonkFun whitelist filter: ${bonkFunMints.size} verified tokens ` +
+    `(filtered from ${raydiumPools.size} USD1 pools)`
   )
 
-  // Use only BonkFun verified mints
+  // Use only verified BonkFun mints
   const allMints = bonkFunMints
 
   // Get detailed data for mints not in DexScreener
@@ -685,7 +591,7 @@ async function fetchAllTokens(): Promise<any[]> {
   let id = 0
 
   for (const mint of allMints) {
-    const raydiumData = raydiumPools.get(mint)
+    const raydiumData = verifiedRaydiumPools.get(mint)
     const dexData = filteredDexScreenerPairs.get(mint)
     const geckoData = filteredGeckoTerminalPools.get(mint)
 
@@ -694,6 +600,10 @@ async function fetchAllTokens(): Promise<any[]> {
 
     if (shouldExclude(symbol, name)) continue
     if (!dexData && !raydiumData && !geckoData) continue
+
+    // Store raw price string for precision (before parsing to number)
+    // This preserves full precision for very small prices like 0.000000000001234567890
+    const priceRaw = dexData?.priceUsd || (geckoData?.price?.toString()) || (raydiumData?.price?.toString()) || "0"
 
     const price = dexData?.priceUsd ? Number.parseFloat(dexData.priceUsd) : geckoData?.price || raydiumData?.price || 0
     const liquidity = dexData?.liquidity?.usd
@@ -744,6 +654,7 @@ async function fetchAllTokens(): Promise<any[]> {
       emoji: getTokenEmoji(name),
       imageUrl: dexData?.info?.imageUrl || geckoData?.logoURI || raydiumData?.logoURI || null,
       price,
+      priceRaw, // Full precision price string for very small values
       priceNative: dexData?.priceNative ? Number.parseFloat(dexData.priceNative) : 0,
       change24h,
       change1h,
