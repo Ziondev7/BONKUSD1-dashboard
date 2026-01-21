@@ -44,29 +44,30 @@ const DEFAULT_CONFIG: VolumeStoreConfig = {
 // In-memory storage (works without Vercel KV)
 const memoryStore: VolumeSnapshot[] = []
 
-// Type for Vercel KV module
-interface KVModule {
-  kv: {
-    zrange: (key: string, start: number, end: number, options?: { byScore?: boolean }) => Promise<string[] | null>
-    zadd: (key: string, member: { score: number; member: string }) => Promise<number>
-    zcard: (key: string) => Promise<number>
-    zremrangebyrank: (key: string, start: number, end: number) => Promise<number>
-  }
+// Type for Vercel KV
+interface KVClient {
+  zrange: (key: string, start: number, end: number, options?: { byScore?: boolean }) => Promise<unknown[] | null>
+  zadd: (key: string, options: { score: number; member: string }) => Promise<number | null>
+  zcard: (key: string) => Promise<number>
+  zremrangebyrank: (key: string, start: number, end: number) => Promise<number>
+  set: (key: string, value: unknown) => Promise<string | null>
+  get: (key: string) => Promise<unknown | null>
 }
 
 /**
  * Dynamically load Vercel KV if available
  */
-async function getKV(): Promise<KVModule["kv"] | null> {
+async function getKV(): Promise<KVClient | null> {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
     return null
   }
 
   try {
-    // Dynamic import with type assertion
-    const kvModule = await import("@vercel/kv") as unknown as KVModule
-    return kvModule.kv
-  } catch {
+    // Dynamic import - @vercel/kv exports kv as named export
+    const module = await import("@vercel/kv")
+    return module.kv as KVClient
+  } catch (e) {
+    console.error("[VolumeStore] Failed to load @vercel/kv:", e)
     return null
   }
 }
