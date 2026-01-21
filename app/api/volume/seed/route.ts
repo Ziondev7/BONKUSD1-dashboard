@@ -187,17 +187,60 @@ async function fetchDuneHistory(): Promise<DuneVolumeRow[]> {
 }
 
 /**
+ * Parse a date string from Dune and extract YYYY-MM-DD and UTC timestamp
+ * Handles various formats like:
+ * - "2025-09-01"
+ * - "2025-09-01T00:00:00.000Z"
+ * - "2025-09-01 00:00:00.000 UTC"
+ */
+function parseDuneDate(dateStr: string): { date: string; timestamp: number } {
+  // Try to extract YYYY-MM-DD from the string using regex
+  const match = dateStr.match(/(\d{4}-\d{2}-\d{2})/)
+  if (match) {
+    const dateOnly = match[1]
+    // Create timestamp at midnight UTC for that date
+    const year = parseInt(dateOnly.slice(0, 4))
+    const month = parseInt(dateOnly.slice(5, 7)) - 1 // JS months are 0-indexed
+    const day = parseInt(dateOnly.slice(8, 10))
+    const timestamp = Date.UTC(year, month, day, 0, 0, 0, 0)
+    return { date: dateOnly, timestamp }
+  }
+
+  // Fallback: try to parse directly
+  const parsed = new Date(dateStr)
+  if (!isNaN(parsed.getTime())) {
+    const dateOnly = parsed.toISOString().split("T")[0]
+    const timestamp = Date.UTC(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth(),
+      parsed.getUTCDate(),
+      0, 0, 0, 0
+    )
+    return { date: dateOnly, timestamp }
+  }
+
+  // Final fallback: use current date (shouldn't happen)
+  console.error(`[Seed] Could not parse date: ${dateStr}`)
+  const now = new Date()
+  const dateOnly = now.toISOString().split("T")[0]
+  return { date: dateOnly, timestamp: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) }
+}
+
+/**
  * Convert Dune rows to DailyVolumeData format
  */
 function convertToDailyVolumeData(rows: DuneVolumeRow[]): DailyVolumeData[] {
-  return rows.map((row) => ({
-    date: row.date.split("T")[0], // Ensure YYYY-MM-DD format
-    timestamp: new Date(row.date + "T00:00:00Z").getTime(),
-    volume: Math.round(row.total_volume_usd),
-    trades: row.num_trades,
-    uniqueTokens: row.unique_tokens,
-    source: "dune" as const,
-  }))
+  return rows.map((row) => {
+    const { date, timestamp } = parseDuneDate(row.date)
+    return {
+      date,
+      timestamp,
+      volume: Math.round(row.total_volume_usd),
+      trades: row.num_trades,
+      uniqueTokens: row.unique_tokens,
+      source: "dune" as const,
+    }
+  })
 }
 
 /**
