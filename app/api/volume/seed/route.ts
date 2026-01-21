@@ -102,33 +102,59 @@ interface DuneResultsResponse {
 }
 
 /**
- * Execute a custom SQL query on Dune Analytics
+ * Create or update a query on Dune Analytics, then execute it
+ * This works with the free tier API
  */
-async function executeDuneQuery(sql: string): Promise<string> {
+async function createAndExecuteQuery(sql: string): Promise<string> {
   const duneApiKey = process.env.DUNE_API_KEY
   if (!duneApiKey) {
     throw new Error("DUNE_API_KEY not configured")
   }
 
-  const response = await fetch(`${DUNE_API}/query/execute`, {
+  // Step 1: Create a new query
+  console.log("[Seed] Creating query on Dune...")
+  const createResponse = await fetch(`${DUNE_API}/query`, {
     method: "POST",
     headers: {
       "x-dune-api-key": duneApiKey,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
+      name: "BonkFun USD1 Volume - Auto Generated",
       query_sql: sql,
+      is_private: false,
+    }),
+  })
+
+  if (!createResponse.ok) {
+    const errorText = await createResponse.text()
+    throw new Error(`Dune create query error: ${createResponse.status} - ${errorText}`)
+  }
+
+  const createData = await createResponse.json()
+  const queryId = createData.query_id
+  console.log(`[Seed] Created query ID: ${queryId}`)
+
+  // Step 2: Execute the query
+  console.log("[Seed] Executing query...")
+  const executeResponse = await fetch(`${DUNE_API}/query/${queryId}/execute`, {
+    method: "POST",
+    headers: {
+      "x-dune-api-key": duneApiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
       performance: "medium",
     }),
   })
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Dune execute error: ${response.status} - ${errorText}`)
+  if (!executeResponse.ok) {
+    const errorText = await executeResponse.text()
+    throw new Error(`Dune execute error: ${executeResponse.status} - ${errorText}`)
   }
 
-  const data: DuneExecuteResponse = await response.json()
-  return data.execution_id
+  const executeData: DuneExecuteResponse = await executeResponse.json()
+  return executeData.execution_id
 }
 
 /**
@@ -217,8 +243,8 @@ async function waitForCompletion(executionId: string, maxWaitMs: number = 300000
 async function fetchDuneHistory(): Promise<DuneVolumeRow[]> {
   console.log("[Seed] Executing custom BonkFun/USD1 volume query...")
 
-  // Execute the query
-  const executionId = await executeDuneQuery(BONKFUN_USD1_VOLUME_QUERY)
+  // Create and execute the query
+  const executionId = await createAndExecuteQuery(BONKFUN_USD1_VOLUME_QUERY)
   console.log(`[Seed] Execution ID: ${executionId}`)
 
   // Wait for completion
@@ -343,6 +369,7 @@ export async function GET() {
       letsBonkPlatform: LETSBONK_PLATFORM,
       usd1Mint: USD1_MINT,
       hasApiKey: !!process.env.DUNE_API_KEY,
+      sqlQuery: BONKFUN_USD1_VOLUME_QUERY.trim(),
     })
   } catch (error) {
     return NextResponse.json(
