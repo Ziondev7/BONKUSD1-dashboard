@@ -4,11 +4,9 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import dynamic from "next/dynamic"
 import { useTokens, useFavorites, useSoundPreference } from "@/hooks/use-tokens"
-import { useDataFreshness, useNewPoolDetection } from "@/hooks/use-realtime"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { sanitizeSearchInput } from "@/lib/utils"
 import { MetricsGrid } from "./dashboard/metrics-grid"
-import { StaleDataBanner, NewPoolNotification } from "./dashboard/realtime-indicators"
 
 // Dynamic import FloatingNav with SSR disabled to prevent hydration mismatch
 // (status indicator depends on client-side data fetching)
@@ -37,20 +35,6 @@ export function BonkDashboard() {
   })
   const { favorites, toggleFavorite, count: favoritesCount } = useFavorites()
 
-  // Real-time enhancement hooks
-  const freshness = useDataFreshness({
-    lastUpdate: lastRefresh,
-    staleThresholdMs: 30 * 1000, // 30 seconds
-    criticalThresholdMs: 2 * 60 * 1000, // 2 minutes
-  })
-
-  const { newPools, hasNewPools, clearNewPools, dismissPool } = useNewPoolDetection({
-    enabled: true,
-    currentTokens: tokens.map(t => ({ address: t.address, symbol: t.symbol, name: t.name })),
-    onNewPool: (pool) => {
-      console.log(`[Dashboard] New pool detected: ${pool.symbol}`)
-    },
-  })
 
   // Refresh countdown state
   const [nextRefreshIn, setNextRefreshIn] = useState(10)
@@ -272,17 +256,6 @@ export function BonkDashboard() {
       {/* Main Content */}
       <main className="relative z-10 max-w-[1600px] mx-auto px-4 md:px-6 py-6 pt-36">
         <ErrorBoundary>
-          {/* Stale Data Warning */}
-          <AnimatePresence>
-            {freshness.isStale && (
-              <StaleDataBanner
-                freshness={freshness}
-                onRefresh={refresh}
-                className="mb-4"
-              />
-            )}
-          </AnimatePresence>
-
           {/* Error Banner */}
           {banner && (
             <InfoBanner banner={banner} onDismiss={() => setBanner(null)} />
@@ -364,17 +337,6 @@ export function BonkDashboard() {
 
       {/* Back to Top */}
       <BackToTop />
-
-      {/* New Pool Notifications */}
-      <AnimatePresence>
-        {hasNewPools && (
-          <NewPoolNotification
-            pools={newPools}
-            onDismiss={dismissPool}
-            onDismissAll={clearNewPools}
-          />
-        )}
-      </AnimatePresence>
     </div>
   )
 }
