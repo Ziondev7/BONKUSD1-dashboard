@@ -478,17 +478,25 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 
   // Step 4: If we have OHLCV data, scale and return
   if (filteredOhlcv.length >= 2 && ohlcvTotalVolume > 0) {
-    // For 24h period, scale to match Raydium's reported total
-    // For longer periods, scale proportionally based on coverage to estimate full ecosystem volume
-    const scaleFactor = ohlcvCoverage > 0 ? (100 / ohlcvCoverage) : 1
+    // For 24h period: scale to match Raydium's authoritative total (most accurate)
+    // For longer periods: scale proportionally based on coverage
+    let scaleFactor: number
+    let totalVolumePeriod: number
+
+    if (period === "24h" && totalVolume24h > 0) {
+      // Use Raydium's 24h total as the authoritative source
+      scaleFactor = totalVolume24h / ohlcvTotalVolume
+      totalVolumePeriod = totalVolume24h
+    } else {
+      // For historical data, scale based on coverage percentage
+      scaleFactor = ohlcvCoverage > 0 ? (100 / ohlcvCoverage) : 1
+      totalVolumePeriod = Math.round(ohlcvTotalVolume * scaleFactor)
+    }
 
     const scaledData = filteredOhlcv.map(point => ({
       ...point,
       volume: Math.round(point.volume * scaleFactor),
     }))
-
-    // Calculate total volume for the period (sum of all bars after scaling)
-    const totalVolumePeriod = scaledData.reduce((sum, d) => sum + d.volume, 0)
 
     console.log(`[Volume] Returning ${scaledData.length} OHLCV data points, total period volume: $${totalVolumePeriod.toLocaleString()}`)
     return {
