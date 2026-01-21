@@ -560,42 +560,52 @@ async function fetchHolderCountFromSolscan(mint: string): Promise<number> {
 }
 
 /**
- * Fetch holder count using Solana RPC getProgramAccounts via Helius (FREE fallback)
- * Note: This counts all token accounts, may include zero-balance accounts
+ * Fetch holder count using Helius DAS API getTokenAccounts
+ * This is more accurate than getProgramAccounts
  */
 async function fetchHolderCountFromHelius(mint: string): Promise<number> {
   const apiKey = process.env.HELIUS_API_KEY
   if (!apiKey) return 0
 
   try {
+    // Use Helius DAS API - getTokenAccounts with pagination to get total
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: mint,
-        method: "getProgramAccounts",
-        params: [
-          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-          {
-            encoding: "base64",
-            dataSlice: { offset: 0, length: 0 },
-            filters: [
-              { dataSize: 165 },
-              { memcmp: { offset: 0, bytes: mint } }
-            ]
+        method: "getTokenAccounts",
+        params: {
+          mint: mint,
+          limit: 1000,
+          options: {
+            showZeroBalance: false  // Only count non-zero balances
           }
-        ]
+        }
       }),
     })
 
     if (response.ok) {
       const data = await response.json()
-      if (data.result && Array.isArray(data.result)) {
-        const holderCount = data.result.length
-        console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${holderCount}`)
-        return holderCount
+
+      // Check if we got paginated results with total
+      if (data.result) {
+        // If total is provided, use it
+        if (data.result.total !== undefined) {
+          console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${data.result.total}`)
+          return data.result.total
+        }
+        // Otherwise count the token_accounts array
+        if (data.result.token_accounts && Array.isArray(data.result.token_accounts)) {
+          const count = data.result.token_accounts.length
+          console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${count}`)
+          return count
+        }
       }
+
+      // Log unexpected response for debugging
+      console.log(`[Helius] ${mint.slice(0, 8)}... unexpected response:`, JSON.stringify(data).slice(0, 200))
     }
   } catch (err) {
     console.log(`[Helius] Error for ${mint.slice(0, 8)}...:`, err)
