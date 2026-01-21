@@ -11,14 +11,17 @@ const DUNE_WEEKLY_QUERY_ID = "5468582" // Weekly Launchpad volume
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache
 const DUNE_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for Dune data
 
+// Category colors for stacked chart
+const CATEGORIES = ["pumpdotfun", "bonk", "moonshot", "bags", "believe"] as const
+type Category = typeof CATEGORIES[number]
+
 // ============================================
 // TYPES
 // ============================================
-interface VolumeDataPoint {
+interface StackedVolumeDataPoint {
   timestamp: number
-  volume: number
-  trades?: number
-  tokenCount?: number
+  volumes: Record<Category, number>
+  total: number
   isWeekly?: boolean
 }
 
@@ -43,12 +46,12 @@ interface DuneApiResponse {
 }
 
 interface CacheEntry {
-  data: VolumeDataPoint[]
+  data: StackedVolumeDataPoint[]
   timestamp: number
   period: string
   totalVolume: number
-  tokenCount: number
-  source: "dune-daily" | "dune-weekly" | "combined"
+  categoryTotals: Record<Category, number>
+  source: "dune-daily" | "dune-weekly"
 }
 
 // ============================================
@@ -56,7 +59,7 @@ interface CacheEntry {
 // ============================================
 const volumeCache: Map<string, CacheEntry> = new Map()
 
-// Separate caches for daily and weekly Dune data
+// Separate caches for daily and weekly Dune data (raw data)
 let duneDailyCache: {
   data: DuneRow[]
   timestamp: number
@@ -73,7 +76,7 @@ let duneWeeklyCache: {
 
 /**
  * Fetch daily volume data from Dune Analytics (query 5440992)
- * Filters for "bonk" category only (BONK coins paired with USD1)
+ * Returns ALL categories for stacked chart
  */
 async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
   // Check cache first
@@ -95,7 +98,7 @@ async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
     const timeoutId = setTimeout(() => controller.abort(), 15000)
 
     const response = await fetch(
-      `${DUNE_API}/query/${DUNE_DAILY_QUERY_ID}/results?limit=1000`,
+      `${DUNE_API}/query/${DUNE_DAILY_QUERY_ID}/results?limit=2000`,
       {
         signal: controller.signal,
         headers: {
@@ -119,11 +122,10 @@ async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
       return null
     }
 
-    // Filter for "bonk" category only (BONK coins paired with USD1)
-    const rows = data.result.rows.filter(row => row.category === "bonk")
-    console.log(`[LaunchpadVolume] Fetched ${rows.length} days of BONK daily data from Dune`)
+    const rows = data.result.rows
+    console.log(`[LaunchpadVolume] Fetched ${rows.length} daily rows from Dune`)
 
-    // Cache the filtered data
+    // Cache the data
     duneDailyCache = {
       data: rows,
       timestamp: Date.now(),
@@ -138,7 +140,7 @@ async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
 
 /**
  * Fetch weekly volume data from Dune Analytics (query 5468582)
- * Filters for "bonk" category only (BONK coins paired with USD1)
+ * Returns ALL categories for stacked chart
  */
 async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
   // Check cache first
@@ -160,7 +162,7 @@ async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
     const timeoutId = setTimeout(() => controller.abort(), 15000)
 
     const response = await fetch(
-      `${DUNE_API}/query/${DUNE_WEEKLY_QUERY_ID}/results?limit=500`,
+      `${DUNE_API}/query/${DUNE_WEEKLY_QUERY_ID}/results?limit=1000`,
       {
         signal: controller.signal,
         headers: {
@@ -184,11 +186,10 @@ async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
       return null
     }
 
-    // Filter for "bonk" category only (BONK coins paired with USD1)
-    const rows = data.result.rows.filter(row => row.category === "bonk")
-    console.log(`[LaunchpadVolume] Fetched ${rows.length} weeks of BONK weekly data from Dune`)
+    const rows = data.result.rows
+    console.log(`[LaunchpadVolume] Fetched ${rows.length} weekly rows from Dune`)
 
-    // Cache the filtered data
+    // Cache the data
     duneWeeklyCache = {
       data: rows,
       timestamp: Date.now(),
@@ -206,71 +207,83 @@ async function fetchDuneWeeklyVolume(): Promise<DuneRow[] | null> {
 // ============================================
 
 /**
- * Process daily data - convert Dune rows to VolumeDataPoints
+ * Process raw Dune data into stacked volume data points
+ * Groups data by timestamp and includes volume for each category
  */
-function processDailyData(
-  rows: DuneRow[]
-): { data: VolumeDataPoint[]; totalVolume: number; tokenCount: number } {
+function processStackedData(
+  rows: DuneRow[],
+  isWeekly: boolean
+): {
+  data: StackedVolumeDataPoint[]
+  totalVolume: number
+  categoryTotals: Record<Category, number>
+} {
   const now = Date.now()
 
-  // Filter and convert rows
-  const filteredRows = rows
-    .map(row => ({
-      timestamp: new Date(row.dt).getTime(),
-      volume: row.volume_usd,
+  // Group by timestamp
+  const groupedByTime = new Map<number, Record<Category, number>>()
+
+  for (const row of rows) {
+    const timestamp = new Date(row.dt).getTime()
+    if (timestamp > now) continue // Skip future dates
+
+    const category = row.category as Category
+    if (!CATEGORIES.includes(category)) continue // Skip unknown categories
+
+    if (!groupedByTime.has(timestamp)) {
+      groupedByTime.set(timestamp, {
+        pumpdotfun: 0,
+        bonk: 0,
+        moonshot: 0,
+        bags: 0,
+        believe: 0,
+      })
+    }
+
+    const volumes = groupedByTime.get(timestamp)!
+    volumes[category] = Math.round(row.volume_usd)
+  }
+
+  // Convert to array and sort by timestamp
+  const data: StackedVolumeDataPoint[] = Array.from(groupedByTime.entries())
+    .map(([timestamp, volumes]) => ({
+      timestamp,
+      volumes,
+      total: Object.values(volumes).reduce((sum, v) => sum + v, 0),
+      isWeekly,
     }))
-    .filter(row => row.timestamp <= now)
     .sort((a, b) => a.timestamp - b.timestamp)
 
-  const data: VolumeDataPoint[] = filteredRows.map(row => ({
-    timestamp: row.timestamp,
-    volume: Math.round(row.volume),
-    isWeekly: false,
-  }))
+  // Calculate totals
+  const categoryTotals: Record<Category, number> = {
+    pumpdotfun: 0,
+    bonk: 0,
+    moonshot: 0,
+    bags: 0,
+    believe: 0,
+  }
 
-  const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
+  let totalVolume = 0
+  for (const point of data) {
+    for (const cat of CATEGORIES) {
+      categoryTotals[cat] += point.volumes[cat]
+    }
+    totalVolume += point.total
+  }
 
-  return { data, totalVolume, tokenCount: data.length }
-}
+  console.log(`[LaunchpadVolume] Processed ${data.length} stacked data points`)
 
-/**
- * Process weekly data - convert Dune rows to VolumeDataPoints
- */
-function processWeeklyData(
-  rows: DuneRow[]
-): { data: VolumeDataPoint[]; totalVolume: number; tokenCount: number } {
-  const now = Date.now()
-
-  // Filter and convert rows
-  const filteredRows = rows
-    .map(row => ({
-      timestamp: new Date(row.dt).getTime(),
-      volume: row.volume_usd,
-    }))
-    .filter(row => row.timestamp <= now)
-    .sort((a, b) => a.timestamp - b.timestamp)
-
-  const data: VolumeDataPoint[] = filteredRows.map(row => ({
-    timestamp: row.timestamp,
-    volume: Math.round(row.volume),
-    isWeekly: true,
-  }))
-
-  const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
-
-  return { data, totalVolume, tokenCount: data.length }
+  return { data, totalVolume, categoryTotals }
 }
 
 /**
  * Main function to fetch Launchpad volume data
- * Uses daily data for "daily" period
- * Uses weekly data for "weekly" period
  */
 async function fetchLaunchpadVolume(period: string): Promise<{
-  data: VolumeDataPoint[]
+  data: StackedVolumeDataPoint[]
   totalVolume: number
-  tokenCount: number
-  source: "dune-daily" | "dune-weekly" | "combined"
+  categoryTotals: Record<Category, number>
+  source: "dune-daily" | "dune-weekly"
 }> {
   console.log(`[LaunchpadVolume] Fetching Launchpad volume for period: ${period}`)
 
@@ -278,42 +291,36 @@ async function fetchLaunchpadVolume(period: string): Promise<{
   if (period === "weekly") {
     const weeklyData = await fetchDuneWeeklyVolume()
     if (weeklyData && weeklyData.length > 0) {
-      const processed = processWeeklyData(weeklyData)
-      console.log(`[LaunchpadVolume] Returning ${processed.data.length} weekly data points`)
+      const processed = processStackedData(weeklyData, true)
       return { ...processed, source: "dune-weekly" }
     }
   }
 
-  // For daily period, use daily data (return all available daily data)
+  // For daily period, use daily data
   const dailyData = await fetchDuneDailyVolume()
   if (dailyData && dailyData.length > 0) {
-    const processed = processDailyData(dailyData)
-    console.log(`[LaunchpadVolume] Returning ${processed.data.length} daily data points`)
+    const processed = processStackedData(dailyData, false)
     return { ...processed, source: "dune-daily" }
   }
 
   // No data available
   console.log("[LaunchpadVolume] No data available from Dune")
-  return { data: [], totalVolume: 0, tokenCount: 0, source: "dune-daily" }
+  return {
+    data: [],
+    totalVolume: 0,
+    categoryTotals: { pumpdotfun: 0, bonk: 0, moonshot: 0, bags: 0, believe: 0 },
+    source: "dune-daily"
+  }
 }
 
 /**
- * Calculate statistics from volume data
+ * Calculate statistics from stacked volume data
  */
 function calculateStats(
-  data: VolumeDataPoint[],
+  data: StackedVolumeDataPoint[],
   totalVolume: number,
-  tokenCount: number
-): {
-  current: number
-  previous: number
-  change: number
-  peak: number
-  low: number
-  average: number
-  totalVolume: number
-  tokenCount: number
-} {
+  categoryTotals: Record<Category, number>
+) {
   if (data.length === 0) {
     return {
       current: 0,
@@ -323,25 +330,25 @@ function calculateStats(
       low: 0,
       average: 0,
       totalVolume,
-      tokenCount,
+      categoryTotals,
     }
   }
 
-  const volumes = data.map(d => d.volume)
-  const current = volumes[volumes.length - 1] || 0
-  const previous = volumes[0] || current
+  const totals = data.map(d => d.total)
+  const current = totals[totals.length - 1] || 0
+  const previous = totals[0] || current
   const change = previous > 0 ? ((current - previous) / previous) * 100 : 0
-  const sumVolume = volumes.reduce((sum, v) => sum + v, 0)
+  const sumVolume = totals.reduce((sum, v) => sum + v, 0)
 
   return {
     current,
     previous,
     change,
-    peak: Math.max(...volumes),
-    low: Math.min(...volumes.filter(v => v > 0)),
-    average: sumVolume / volumes.length,
+    peak: Math.max(...totals),
+    low: Math.min(...totals.filter(v => v > 0)),
+    average: sumVolume / totals.length,
     totalVolume: Math.max(totalVolume, sumVolume),
-    tokenCount,
+    categoryTotals,
   }
 }
 
@@ -358,17 +365,17 @@ export async function GET(request: Request) {
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return NextResponse.json({
       history: cached.data,
-      stats: calculateStats(cached.data, cached.totalVolume, cached.tokenCount),
+      stats: calculateStats(cached.data, cached.totalVolume, cached.categoryTotals),
       period,
       dataPoints: cached.data.length,
       cached: true,
-      tokenCount: cached.tokenCount,
+      categories: CATEGORIES,
       source: cached.source,
     })
   }
 
   // Fetch fresh data
-  const { data, totalVolume, tokenCount, source } = await fetchLaunchpadVolume(period)
+  const { data, totalVolume, categoryTotals, source } = await fetchLaunchpadVolume(period)
 
   // Update cache
   volumeCache.set(period, {
@@ -376,17 +383,17 @@ export async function GET(request: Request) {
     timestamp: Date.now(),
     period,
     totalVolume,
-    tokenCount,
+    categoryTotals,
     source,
   })
 
   return NextResponse.json({
     history: data,
-    stats: calculateStats(data, totalVolume, tokenCount),
+    stats: calculateStats(data, totalVolume, categoryTotals),
     period,
     dataPoints: data.length,
     cached: false,
-    tokenCount,
+    categories: CATEGORIES,
     source,
   })
 }

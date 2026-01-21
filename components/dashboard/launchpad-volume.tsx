@@ -8,20 +8,40 @@ import {
   TrendingDown,
   Rocket,
   Activity,
-  Coins
 } from "lucide-react"
 import { formatNumber, formatCompactNumber, cn } from "@/lib/utils"
 
-interface VolumeDataPoint {
+// Categories for stacked chart
+const CATEGORIES = ["pumpdotfun", "bonk", "moonshot", "bags", "believe"] as const
+type Category = typeof CATEGORIES[number]
+
+// Category colors for the stacked chart
+const CATEGORY_COLORS: Record<Category, { bg: string; hover: string; label: string }> = {
+  pumpdotfun: { bg: "bg-[#00dc82]", hover: "bg-[#00ff96]", label: "Pump.fun" },
+  bonk: { bg: "bg-[#f7931a]", hover: "bg-[#ffaa33]", label: "BONK" },
+  moonshot: { bg: "bg-[#8b5cf6]", hover: "bg-[#a78bfa]", label: "Moonshot" },
+  bags: { bg: "bg-[#06b6d4]", hover: "bg-[#22d3ee]", label: "Bags" },
+  believe: { bg: "bg-[#ec4899]", hover: "bg-[#f472b6]", label: "Believe" },
+}
+
+// Hex colors for inline styles
+const CATEGORY_HEX: Record<Category, string> = {
+  pumpdotfun: "#00dc82",
+  bonk: "#f7931a",
+  moonshot: "#8b5cf6",
+  bags: "#06b6d4",
+  believe: "#ec4899",
+}
+
+interface StackedVolumeDataPoint {
   timestamp: number
-  volume: number
-  trades?: number
-  tokenCount?: number
+  volumes: Record<Category, number>
+  total: number
   isWeekly?: boolean
 }
 
 interface LaunchpadVolumeResponse {
-  history: VolumeDataPoint[]
+  history: StackedVolumeDataPoint[]
   stats: {
     current: number
     previous: number
@@ -30,12 +50,12 @@ interface LaunchpadVolumeResponse {
     low: number
     average: number
     totalVolume: number
-    tokenCount?: number
+    categoryTotals: Record<Category, number>
   }
   period: string
   dataPoints: number
   cached?: boolean
-  tokenCount?: number
+  categories: readonly Category[]
   source?: string
 }
 
@@ -46,32 +66,18 @@ const PERIODS = [
 
 const fetcher = (url: string) => fetch(url).then(res => res.json())
 
-// Volume bar chart component with green theme
+// Stacked bar chart component for launchpad volume
 function LaunchpadChart({
   data,
-  isPositive,
   period
 }: {
-  data: VolumeDataPoint[]
-  isPositive: boolean
+  data: StackedVolumeDataPoint[]
   period: string
 }) {
-  const [hoveredBar, setHoveredBar] = useState<{ index: number; x: number; y: number } | null>(null)
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null)
 
-  const volumes = data.map(d => d.volume)
-  const max = Math.max(...volumes) * 1.1
-  const min = 0
-
-  // Format time label based on period
-  const formatTimeLabel = (timestamp: number): string => {
-    const date = new Date(timestamp)
-    if (period === "daily") {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-    } else {
-      // Weekly - show week start
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-    }
-  }
+  const totals = data.map(d => d.total)
+  const max = Math.max(...totals) * 1.1
 
   // Get full date string for tooltip
   const getFullDateLabel = (timestamp: number): string => {
@@ -84,7 +90,6 @@ function LaunchpadChart({
         year: 'numeric'
       })
     } else {
-      // Weekly - show week starting date
       return `Week of ${date.toLocaleDateString([], {
         month: 'short',
         day: 'numeric',
@@ -101,17 +106,11 @@ function LaunchpadChart({
 
     for (let i = 0; i < data.length; i += step) {
       const date = new Date(data[i].timestamp)
-      let label: string
-      if (period === "daily") {
-        label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      } else {
-        // Weekly - show month/day
-        label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-      }
+      const label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
       labels.push({ index: i, label })
     }
     return labels
-  }, [data, period])
+  }, [data])
 
   if (data.length < 2) {
     return (
@@ -122,46 +121,52 @@ function LaunchpadChart({
   }
 
   const barWidth = Math.max(2, Math.min(12, (100 / data.length) * 0.7))
-  const gap = Math.max(1, (100 / data.length) * 0.3)
 
   return (
     <div className="relative h-56">
       {/* Chart container */}
       <div className="absolute inset-0 flex items-end justify-between px-1 pb-8">
         {data.map((d, i) => {
-          const heightPercent = max > 0 ? ((d.volume - min) / (max - min)) * 100 : 0
-          const isHovered = hoveredBar?.index === i
+          const totalHeightPercent = max > 0 ? (d.total / max) * 100 : 0
+          const isHovered = hoveredBar === i
 
           return (
             <div
               key={i}
               className="relative flex flex-col items-center justify-end h-full"
               style={{ width: `${barWidth}%` }}
-              onMouseEnter={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                setHoveredBar({
-                  index: i,
-                  x: rect.left + rect.width / 2,
-                  y: rect.top
-                })
-              }}
+              onMouseEnter={() => setHoveredBar(i)}
               onMouseLeave={() => setHoveredBar(null)}
             >
-              {/* The candle/bar - green theme for Launchpad */}
+              {/* Stacked bars - render from bottom to top */}
               <motion.div
                 initial={{ height: 0 }}
-                animate={{ height: `${Math.max(heightPercent, 2)}%` }}
+                animate={{ height: `${Math.max(totalHeightPercent, 2)}%` }}
                 transition={{ duration: 0.5, delay: i * 0.01 }}
                 className={cn(
-                  "w-full rounded-t-sm cursor-pointer transition-all duration-150",
-                  isHovered
-                    ? "bg-success shadow-[0_0_15px_rgba(0,255,136,0.6)]"
-                    : "bg-success/70 hover:bg-success"
+                  "w-full rounded-t-sm cursor-pointer transition-all duration-150 flex flex-col-reverse overflow-hidden",
+                  isHovered && "shadow-[0_0_15px_rgba(255,255,255,0.3)]"
                 )}
-                style={{
-                  minHeight: '4px',
-                }}
-              />
+                style={{ minHeight: '4px' }}
+              >
+                {CATEGORIES.map((cat) => {
+                  const catVolume = d.volumes[cat] || 0
+                  const catPercent = d.total > 0 ? (catVolume / d.total) * 100 : 0
+                  if (catPercent === 0) return null
+
+                  return (
+                    <div
+                      key={cat}
+                      style={{
+                        height: `${catPercent}%`,
+                        backgroundColor: CATEGORY_HEX[cat],
+                        opacity: isHovered ? 1 : 0.85,
+                      }}
+                      className="w-full transition-opacity duration-150"
+                    />
+                  )
+                })}
+              </motion.div>
             </div>
           )
         })}
@@ -197,33 +202,53 @@ function LaunchpadChart({
 
       {/* Tooltip */}
       <AnimatePresence>
-        {hoveredBar !== null && data[hoveredBar.index] && (
+        {hoveredBar !== null && data[hoveredBar] && (
           <motion.div
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 5 }}
             className="absolute z-50 pointer-events-none"
             style={{
-              left: `${(hoveredBar.index / data.length) * 100}%`,
+              left: `${(hoveredBar / data.length) * 100}%`,
               bottom: '100%',
               transform: 'translateX(-50%)',
               marginBottom: '8px'
             }}
           >
-            <div className="bg-[#0a0a0c] border border-success/30 rounded-lg px-3 py-2 shadow-[0_0_20px_rgba(0,255,136,0.2)]">
-              <p className="text-success font-mono text-xs font-bold mb-1">
-                {getFullDateLabel(data[hoveredBar.index].timestamp)}
+            <div className="bg-[#0a0a0c] border border-white/20 rounded-lg px-3 py-2 shadow-xl min-w-[180px]">
+              <p className="text-white font-mono text-xs font-bold mb-2 border-b border-white/10 pb-1">
+                {getFullDateLabel(data[hoveredBar].timestamp)}
               </p>
-              <p className="text-white font-mono text-sm font-bold">
-                ${formatNumber(data[hoveredBar.index].volume)}
-              </p>
-              {data[hoveredBar.index].tokenCount && (
-                <p className="text-white/50 font-mono text-xs mt-1">
-                  {data[hoveredBar.index].tokenCount} tokens
-                </p>
-              )}
+              {/* Category breakdown */}
+              <div className="space-y-1">
+                {CATEGORIES.map((cat) => {
+                  const vol = data[hoveredBar].volumes[cat] || 0
+                  if (vol === 0) return null
+                  return (
+                    <div key={cat} className="flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <div
+                          className="w-2 h-2 rounded-sm"
+                          style={{ backgroundColor: CATEGORY_HEX[cat] }}
+                        />
+                        <span className="text-white/70">{CATEGORY_COLORS[cat].label}</span>
+                      </div>
+                      <span className="text-white font-mono font-medium">
+                        ${formatCompactNumber(vol)}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Total */}
+              <div className="flex items-center justify-between mt-2 pt-1 border-t border-white/10 text-xs">
+                <span className="text-white/50">Total</span>
+                <span className="text-white font-mono font-bold">
+                  ${formatCompactNumber(data[hoveredBar].total)}
+                </span>
+              </div>
               {/* Arrow */}
-              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent border-t-success/30" />
+              <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[6px] border-transparent border-t-white/20" />
             </div>
           </motion.div>
         )}
@@ -271,13 +296,6 @@ export function LaunchpadVolume() {
             </div>
           )}
 
-          {/* Token count badge */}
-          {data?.tokenCount && data.tokenCount > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 border border-white/10" title="Number of unique BONK tokens traded">
-              <Coins className="w-3 h-3 text-white/50" />
-              <span className="text-[10px] font-mono text-white/50">{data.tokenCount} tokens</span>
-            </div>
-          )}
         </div>
 
         {/* Period Selector */}
@@ -346,6 +364,30 @@ export function LaunchpadVolume() {
           )}
         </div>
 
+        {/* Legend */}
+        {data && data.history.length > 0 && (
+          <div className="flex flex-wrap items-center gap-4 mb-4">
+            {CATEGORIES.map((cat) => {
+              const total = data.stats.categoryTotals?.[cat] || 0
+              if (total === 0) return null
+              return (
+                <div key={cat} className="flex items-center gap-2">
+                  <div
+                    className="w-3 h-3 rounded-sm"
+                    style={{ backgroundColor: CATEGORY_HEX[cat] }}
+                  />
+                  <span className="text-xs font-mono text-white/70">
+                    {CATEGORY_COLORS[cat].label}
+                  </span>
+                  <span className="text-xs font-mono text-white/40">
+                    ${formatCompactNumber(total)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         {/* Chart */}
         {isLoading ? (
           <div className="h-56 flex items-center justify-center">
@@ -359,7 +401,7 @@ export function LaunchpadVolume() {
             Failed to load launchpad volume
           </div>
         ) : data && data.history.length > 0 ? (
-          <LaunchpadChart data={data.history} isPositive={isPositive} period={period} />
+          <LaunchpadChart data={data.history} period={period} />
         ) : (
           <div className="h-56 flex items-center justify-center text-white/30 font-mono text-sm">
             No launchpad data available - ensure DUNE_API_KEY is configured
@@ -368,13 +410,7 @@ export function LaunchpadVolume() {
 
         {/* Bottom Stats Grid */}
         {data && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
-            <div className="text-center">
-              <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Unique Tokens
-              </p>
-              <p className="text-white font-mono font-bold">{data.tokenCount || 0}</p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
                 Data Points
