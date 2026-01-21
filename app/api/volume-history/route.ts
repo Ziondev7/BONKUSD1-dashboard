@@ -51,12 +51,13 @@ interface DuneRawRow {
   trade_count: number
   daily_volume_usd: number
   pool_address?: string
-  token_mint?: string
+  token_mint?: string // The paired token mint (not USD1)
   token_symbol?: string
 }
 
 interface PoolVolumeData {
   poolId: string
+  tokenMint: string // The paired token mint address (not USD1)
   symbol: string
   volume24h: number
   liquidity: number
@@ -134,11 +135,15 @@ async function getBonkfunPoolAddresses(): Promise<Set<string>> {
  * Fetch historical USD1 volume data from Dune Analytics
  * Filters data to only include BONK.fun launched tokens
  *
- * IMPORTANT: Your Dune query needs to return per-pool data. Use this SQL:
+ * IMPORTANT: Your Dune query needs to return per-token data. Use this SQL:
  *
  * SELECT
  *   date_trunc('day', block_time) AS date,
- *   project_contract_address AS pool_address,
+ *   CASE
+ *     WHEN token_bought_mint_address = 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB'
+ *     THEN token_sold_mint_address
+ *     ELSE token_bought_mint_address
+ *   END AS token_mint,
  *   COUNT(*) AS trade_count,
  *   SUM(amount_usd) AS daily_volume_usd
  * FROM dex_solana.trades
@@ -186,22 +191,25 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
 
     console.log(`[Dune] Raw data: ${rows.length} rows`)
 
-    // Check if data has pool_address field (per-pool query)
-    const hasPoolData = rows.length > 0 && rows[0].pool_address
+    // Check if data has token_mint or pool_address field (per-token/pool query)
+    const hasTokenData = rows.length > 0 && (rows[0].token_mint || rows[0].pool_address)
 
     let data: DuneVolumeData[]
 
-    if (hasPoolData && bonkfunPools && bonkfunPools.size > 0) {
-      // Filter by BONK.fun pool addresses and aggregate by date
-      console.log(`[Dune] Filtering by ${bonkfunPools.size} BONK.fun pools...`)
+    if (hasTokenData && bonkfunPools && bonkfunPools.size > 0) {
+      // Filter by BONK.fun token mints and aggregate by date
+      console.log(`[Dune] Filtering by ${bonkfunPools.size} BONK.fun tokens...`)
 
       const dateAggregates = new Map<string, { volume: number; trades: number }>()
+      let matchedRows = 0
 
       rows.forEach((row) => {
-        const poolAddr = (row.pool_address || "").toLowerCase()
+        // Try token_mint first, then fall back to pool_address
+        const identifier = (row.token_mint || row.pool_address || "").toLowerCase()
 
-        // Only include pools that are in our BONK.fun pool list
-        if (bonkfunPools.has(poolAddr)) {
+        // Only include tokens that are in our BONK.fun token list
+        if (bonkfunPools.has(identifier)) {
+          matchedRows++
           const existing = dateAggregates.get(row.date) || { volume: 0, trades: 0 }
           existing.volume += Number(row.daily_volume_usd) || 0
           existing.trades += Number(row.trade_count) || 0
@@ -215,11 +223,11 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
         daily_volume_usd: agg.volume,
       }))
 
-      console.log(`[Dune] After filtering: ${data.length} days of BONK.fun volume`)
+      console.log(`[Dune] Matched ${matchedRows} rows -> ${data.length} days of BONK.fun volume`)
     } else {
-      // No pool filtering available - use data as-is (aggregated format)
+      // No token filtering available - use data as-is (aggregated format)
       // This fallback handles the old query format
-      console.log("[Dune] Using aggregated data (no pool filtering available)")
+      console.log("[Dune] Using aggregated data (no token filtering available)")
 
       data = rows.map((row) => ({
         date: row.date,
@@ -361,11 +369,12 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
       const volume24h = pool.day?.volume || 0
       const liquidity = pool.tvl || 0
 
-      // Use pool ID as key to avoid duplicates, keep highest volume pool per token
+      // Use token mint as key to avoid duplicates, keep highest volume pool per token
       const existing = poolMap.get(pairedMint)
       if (!existing || volume24h > existing.volume24h) {
         poolMap.set(pairedMint, {
           poolId: pool.id,
+          tokenMint: pairedMint, // Store the token mint for Dune filtering
           symbol: pairedSymbol || "Unknown",
           volume24h,
           liquidity,
@@ -645,11 +654,11 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 
   // Step 3: For 7d/1m/all, use Dune Analytics for accurate historical data
   if (period !== "24h") {
-    // Get BONK.fun pool addresses to filter Dune data
-    const bonkfunPoolAddresses = new Set(pools.map(p => p.poolId.toLowerCase()))
-    console.log(`[Volume] Will filter Dune data by ${bonkfunPoolAddresses.size} BONK.fun pools`)
+    // Get BONK.fun token mint addresses to filter Dune data
+    const bonkfunTokenMints = new Set(pools.map(p => p.tokenMint.toLowerCase()))
+    console.log(`[Volume] Will filter Dune data by ${bonkfunTokenMints.size} BONK.fun token mints`)
 
-    const duneData = await fetchDuneHistoricalVolume(bonkfunPoolAddresses)
+    const duneData = await fetchDuneHistoricalVolume(bonkfunTokenMints)
 
     if (duneData.length > 0) {
       const { data: volumePoints, totalVolume } = duneDataToVolumePoints(duneData, cutoffTime, period)
