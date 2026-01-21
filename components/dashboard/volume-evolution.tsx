@@ -508,7 +508,7 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
 
         {/* Bottom Stats Grid */}
         {data && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/[0.04]">
             <div className="text-center">
               <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
                 Active Pools
@@ -541,18 +541,6 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
                   ? new Date(data.history[data.history.length - 1].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   : "—"
                 }
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-white/30 text-[10px] font-mono uppercase tracking-wider mb-1">
-                Trend
-              </p>
-              <p className={cn(
-                "font-mono font-bold flex items-center justify-center gap-1",
-                isPositive ? "text-success" : "text-danger"
-              )}>
-                {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                {isPositive ? "Bullish" : "Bearish"}
               </p>
             </div>
           </div>

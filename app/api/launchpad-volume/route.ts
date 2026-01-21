@@ -325,32 +325,32 @@ async function fetchLaunchpadVolume(period: string): Promise<{
 }> {
   console.log(`[LaunchpadVolume] Fetching Launchpad volume for period: ${period}`)
 
-  // For weekly period, use weekly data
+  // For weekly period, use weekly data only
   if (period === "weekly") {
     const weeklyData = await fetchDuneWeeklyVolume()
     if (weeklyData && weeklyData.length > 0) {
       const processed = processStackedData(weeklyData, true)
       return { ...processed, source: "dune-weekly" }
     }
+    // Weekly not available
+    console.log("[LaunchpadVolume] Weekly data not available")
+    return {
+      data: [],
+      totalVolume: 0,
+      categoryTotals: { pumpdotfun: 0, bonk: 0, moonshot: 0, bags: 0, believe: 0 },
+      source: "dune-weekly"
+    }
   }
 
-  // For daily period, try daily data first
+  // For daily period, use daily data only - NO FALLBACK to weekly
   const dailyData = await fetchDuneDailyVolume()
   if (dailyData && dailyData.length > 0) {
     const processed = processStackedData(dailyData, false)
     return { ...processed, source: "dune-daily" }
   }
 
-  // FALLBACK: If daily data fails, try to use weekly data aggregated to show something
-  console.log("[LaunchpadVolume] Daily data failed, falling back to weekly data")
-  const weeklyFallback = await fetchDuneWeeklyVolume()
-  if (weeklyFallback && weeklyFallback.length > 0) {
-    const processed = processStackedData(weeklyFallback, true)
-    return { ...processed, source: "dune-weekly" }
-  }
-
-  // No data available
-  console.log("[LaunchpadVolume] No data available from Dune")
+  // Daily not available - don't fall back to weekly (they show different granularity)
+  console.log("[LaunchpadVolume] Daily data not available from Dune")
   return {
     data: [],
     totalVolume: 0,
