@@ -75,6 +75,38 @@ let duneWeeklyCache: {
 // ============================================
 
 /**
+ * Execute a Dune query to refresh its results
+ */
+async function executeDuneQuery(queryId: string, duneApiKey: string): Promise<string | null> {
+  try {
+    console.log(`[LaunchpadVolume] Executing Dune query ${queryId}...`)
+
+    const response = await fetch(
+      `${DUNE_API}/query/${queryId}/execute`,
+      {
+        method: "POST",
+        headers: {
+          "x-dune-api-key": duneApiKey,
+          "Content-Type": "application/json",
+        },
+      }
+    )
+
+    if (!response.ok) {
+      console.error(`[LaunchpadVolume] Failed to execute query ${queryId}:`, response.status)
+      return null
+    }
+
+    const data = await response.json()
+    console.log(`[LaunchpadVolume] Query ${queryId} execution started:`, data.execution_id)
+    return data.execution_id
+  } catch (error) {
+    console.error(`[LaunchpadVolume] Error executing query ${queryId}:`, error)
+    return null
+  }
+}
+
+/**
  * Fetch daily volume data from Dune Analytics (query 5440992)
  * Returns ALL categories for stacked chart
  */
@@ -112,13 +144,19 @@ async function fetchDuneDailyVolume(): Promise<DuneRow[] | null> {
 
     if (!response.ok) {
       console.error("[LaunchpadVolume] Dune daily API error:", response.status)
+      // Try to execute the query to refresh it
+      await executeDuneQuery(DUNE_DAILY_QUERY_ID, duneApiKey)
       return null
     }
 
     const data: DuneApiResponse = await response.json()
 
     if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
-      console.error("[LaunchpadVolume] Dune daily query not ready or no results")
+      console.error("[LaunchpadVolume] Dune daily query state:", data.state, "rows:", data.result?.rows?.length || 0)
+      // Try to execute the query to refresh it
+      if (data.state === "QUERY_STATE_EXPIRED" || !data.result?.rows) {
+        await executeDuneQuery(DUNE_DAILY_QUERY_ID, duneApiKey)
+      }
       return null
     }
 
@@ -296,11 +334,19 @@ async function fetchLaunchpadVolume(period: string): Promise<{
     }
   }
 
-  // For daily period, use daily data
+  // For daily period, try daily data first
   const dailyData = await fetchDuneDailyVolume()
   if (dailyData && dailyData.length > 0) {
     const processed = processStackedData(dailyData, false)
     return { ...processed, source: "dune-daily" }
+  }
+
+  // FALLBACK: If daily data fails, try to use weekly data aggregated to show something
+  console.log("[LaunchpadVolume] Daily data failed, falling back to weekly data")
+  const weeklyFallback = await fetchDuneWeeklyVolume()
+  if (weeklyFallback && weeklyFallback.length > 0) {
+    const processed = processStackedData(weeklyFallback, true)
+    return { ...processed, source: "dune-weekly" }
   }
 
   // No data available
