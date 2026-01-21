@@ -1061,6 +1061,15 @@ body.pro-mode-active {
   border-radius: 0;
 }
 
+/* Pro mode charts - override fixed height to fill container */
+.pro-panel .h-56 {
+  height: 100% !important;
+}
+
+.pro-panel .h-48 {
+  height: 100% !important;
+}
+
 /* Pro mode typography - monospace for all numbers */
 .pro-panel [class*="tabular-nums"],
 .pro-panel .font-mono {
