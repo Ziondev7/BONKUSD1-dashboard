@@ -72,7 +72,7 @@ async function executeQuery(queryId: number): Promise<string> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      performance: "medium",
+      performance: "large",
     }),
   })
 
@@ -143,7 +143,7 @@ async function getExecutionResults(executionId: string): Promise<DuneVolumeRow[]
 /**
  * Poll for query completion with exponential backoff
  */
-async function waitForCompletion(executionId: string, maxWaitMs: number = 300000): Promise<void> {
+async function waitForCompletion(executionId: string, maxWaitMs: number = 600000): Promise<void> {
   const startTime = Date.now()
   let delay = 2000 // Start with 2 second delay
 
