@@ -608,7 +608,10 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   // ========================================
   const kvData = await fetchKVVolumeHistory(period)
 
-  if (kvData && kvData.data.length > 0) {
+  // For 24h period, we need hourly data - KV only has daily, so skip to OHLCV fallback
+  const minDataPointsFor24h = 6 // Need at least 6 hourly points for a decent 24h chart
+
+  if (kvData && kvData.data.length > 0 && (period !== "24h" || kvData.data.length >= minDataPointsFor24h)) {
     // Get today's live volume from Raydium
     const todayLive = await fetchTodayLiveVolume()
 
@@ -646,9 +649,13 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 
   // ========================================
   // STEP 2: Fallback to Dune Analytics (if KV is empty)
+  // Skip for 24h since Dune only has daily data too
   // ========================================
-  console.log("[Volume] KV empty, trying Dune Analytics...")
-  const duneData = await fetchDuneVolumeHistory()
+  if (period === "24h") {
+    console.log("[Volume] Skipping Dune for 24h (need hourly data), going to Raydium OHLCV...")
+  }
+
+  const duneData = period !== "24h" ? await fetchDuneVolumeHistory() : null
 
   if (duneData && duneData.length > 0) {
     const { data, totalVolume, uniqueTokens } = convertDuneToVolumeData(duneData, period)
