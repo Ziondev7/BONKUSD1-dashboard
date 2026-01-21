@@ -1032,3 +1032,125 @@ body.pro-mode-active {
 .pro-animate-in {
   animation: pro-fade-in 0.2s ease-out forwards;
 }
+
+/* Pro mode panel - terminal style card */
+.pro-panel {
+  background: rgba(8, 8, 10, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.pro-panel:hover {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Pro mode nested chart - removes outer wrapper styling */
+.pro-panel .glass-card-solid {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.pro-panel .pro-bento-item {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+/* Pro mode typography - monospace for all numbers */
+.pro-panel [class*="tabular-nums"],
+.pro-panel .font-mono {
+  font-feature-settings: "tnum" on, "lnum" on;
+}
+
+/* Pro mode compact navigation header */
+.pro-nav-compact {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+.pro-nav-compact .px-4 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+/* Pro mode virtualized list optimizations */
+.pro-virtual-list {
+  will-change: transform;
+}
+
+.pro-virtual-list > div {
+  contain: layout style;
+}
+
+/* Pro mode chart inside panel - fills container */
+.pro-panel .h-\\[140px\\] {
+  height: 100% !important;
+}
+
+/* Pro mode scanline effect (optional, uncomment to enable) */
+/*
+.pro-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+*/
+
+/* Pro mode glow effects - reduced for density */
+body.pro-mode-active .glow-bonk {
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.15);
+}
+
+body.pro-mode-active .text-glow-bonk {
+  text-shadow: 0 0 6px rgba(250, 204, 21, 0.3);
+}
+
+/* Pro mode focus states */
+body.pro-mode-active *:focus-visible {
+  outline: 1px solid var(--bonk);
+  outline-offset: 1px;
+}
+
+/* Pro mode selection */
+body.pro-mode-active ::selection {
+  background: rgba(250, 204, 21, 0.25);
+  color: white;
+}
+
+/* Hide standard elements in pro mode */
+body.pro-mode-active .mesh-gradient {
+  opacity: 0.5;
+}
+
+/* Pro mode shimmer effect for loading */
+@keyframes pro-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+body.pro-mode-active .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 25%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.02) 75%
+  );
+  background-size: 200% 100%;
+  animation: pro-shimmer 1.5s infinite;
+}

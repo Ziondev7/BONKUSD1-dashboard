@@ -343,7 +343,7 @@ export function LaunchpadVolume({ compact = false }: LaunchpadVolumeProps) {
         )}
 
         {/* Compact Chart */}
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-[120px]">
           {isLoading ? (
             <div className="h-full flex items-center justify-center">
               <div className="w-4 h-4 border-2 border-success border-t-transparent rounded-full animate-spin" />
@@ -353,7 +353,7 @@ export function LaunchpadVolume({ compact = false }: LaunchpadVolumeProps) {
               Failed to load
             </div>
           ) : data && data.history.length > 0 ? (
-            <div className="h-[140px]">
+            <div className="h-full">
               <LaunchpadChart data={data.history} period={period} />
             </div>
           ) : (

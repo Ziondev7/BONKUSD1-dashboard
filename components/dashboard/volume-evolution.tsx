@@ -362,7 +362,7 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
         </div>
 
         {/* Compact Chart */}
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-[120px]">
           {isLoading ? (
             <div className="h-full flex items-center justify-center">
               <div className="w-4 h-4 border-2 border-bonk border-t-transparent rounded-full animate-spin" />
@@ -372,7 +372,7 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
               Failed to load
             </div>
           ) : data && data.history.length > 0 ? (
-            <div className="h-[140px]">
+            <div className="h-full">
               <VolumeChart data={data.history} isPositive={isPositive} period={period} />
             </div>
           ) : (

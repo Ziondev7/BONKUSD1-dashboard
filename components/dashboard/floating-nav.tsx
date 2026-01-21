@@ -82,8 +82,8 @@ export function FloatingNav({
 
   return (
     <nav
-      className={`fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-500 w-[98%] max-w-[1600px]
-        ${scrolled ? "top-2" : "top-4"}`}
+      className={`fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 w-[98%] max-w-[1600px]
+        ${isProMode ? "top-1" : scrolled ? "top-2" : "top-4"}`}
     >
       <motion.div
         initial={{ y: -20, opacity: 0 }}
@@ -91,10 +91,12 @@ export function FloatingNav({
         transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
         className={`glass-card-elevated transition-all duration-300 ${
           scrolled ? "shadow-2xl" : ""
-        }`}
+        } ${isProMode ? "pro-nav-compact" : ""}`}
       >
         {/* Top Row: Brand + Metrics + Actions */}
-        <div className={`px-4 md:px-6 py-3 flex items-center justify-between ${!isProMode ? "border-b border-white/5" : ""}`}>
+        <div className={`px-4 md:px-6 flex items-center justify-between ${
+          isProMode ? "py-2" : "py-3"
+        } ${!isProMode ? "border-b border-white/5" : ""}`}>
           {/* Left: Brand & Status */}
           <div className="flex items-center gap-4 md:gap-6">
             {/* Logo */}
@@ -102,15 +104,15 @@ export function FloatingNav({
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="relative w-10 h-10 md:w-11 md:h-11"
+              className={`relative ${isProMode ? "w-8 h-8" : "w-10 h-10 md:w-11 md:h-11"}`}
               title="Back to top"
             >
               <Image
                 src="/logo.png"
                 alt="BONKUSD1"
-                width={44}
-                height={44}
-                className="object-contain drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]"
+                width={isProMode ? 32 : 44}
+                height={isProMode ? 32 : 44}
+                className={`object-contain ${isProMode ? "drop-shadow-[0_0_10px_rgba(250,204,21,0.3)]" : "drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]"}`}
                 priority
               />
             </motion.button>
@@ -118,7 +120,9 @@ export function FloatingNav({
             {/* Brand name */}
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="font-black tracking-tight text-xl hidden sm:flex items-center gap-1 hover:opacity-80 transition-opacity"
+              className={`font-black tracking-tight hidden sm:flex items-center gap-1 hover:opacity-80 transition-opacity ${
+                isProMode ? "text-base" : "text-xl"
+              }`}
               title="Back to top"
             >
               <span className="text-white">BONK</span>
