@@ -558,7 +558,8 @@ function createVolumeDistribution(totalVolume: number, period: string, poolCount
 function calculateStats(
   data: VolumeDataPoint[],
   totalVolume24h: number,
-  poolCount: number
+  poolCount: number,
+  period: string
 ): {
   current: number
   previous: number
@@ -588,8 +589,12 @@ function calculateStats(
   const change = previous > 0 ? ((current - previous) / previous) * 100 : 0
   const sumVolume = volumes.reduce((sum, v) => sum + v, 0)
 
-  // Use the Raydium total if it's more accurate
-  const totalVolume = Math.max(totalVolume24h, sumVolume)
+  // For 24h period: use Raydium's authoritative total (ensures accuracy)
+  // For 7d/1m/all periods: use the sum of historical data points
+  // This is because totalVolume24h is ONLY the current 24h volume, not historical totals
+  const totalVolume = period === "24h"
+    ? Math.max(totalVolume24h, sumVolume)
+    : sumVolume
 
   return {
     current,
@@ -616,7 +621,7 @@ export async function GET(request: Request) {
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return NextResponse.json({
       history: cached.data,
-      stats: calculateStats(cached.data, cached.totalVolume24h, cached.poolCount),
+      stats: calculateStats(cached.data, cached.totalVolume24h, cached.poolCount, period),
       period,
       dataPoints: cached.data.length,
       cached: true,
@@ -648,7 +653,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     history: volumeData,
-    stats: calculateStats(volumeData, totalVolume24h, poolCount),
+    stats: calculateStats(volumeData, totalVolume24h, poolCount, period),
     period,
     dataPoints: volumeData.length,
     cached: false,
