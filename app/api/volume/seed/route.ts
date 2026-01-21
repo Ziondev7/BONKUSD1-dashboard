@@ -9,60 +9,14 @@ import {
 // Dune Analytics API configuration
 const DUNE_API = "https://api.dune.com/api/v1"
 
-// Key addresses for BonkFun token identification
+// Saved Dune query ID for BonkFun/USD1 volume
+// Query URL: https://dune.com/queries/6572422
+const DUNE_QUERY_ID = 6572422
+
+// Key addresses for BonkFun token identification (for reference)
 const LAUNCHLAB_PROGRAM = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj"
 const LETSBONK_PLATFORM = "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1"
 const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
-
-/**
- * SQL query to get BonkFun/USD1 daily volume
- *
- * This query:
- * 1. Identifies BonkFun tokens created via Raydium LaunchLab with LetsBonk platform
- * 2. Joins with DEX trades where one side is USD1 and other side is a BonkFun token
- * 3. Aggregates volume by day
- *
- * Account indices in initializeV2 instruction (1-indexed for Dune SQL):
- * - account_arguments[4] = platform_config (LetsBonk address)
- * - account_arguments[7] = base_mint (the BonkFun token)
- */
-const BONKFUN_USD1_VOLUME_QUERY = `
-WITH bonkfun_tokens AS (
-  SELECT DISTINCT
-    account_arguments[7] as token_mint
-  FROM solana.instruction_calls
-  WHERE executing_account = '${LAUNCHLAB_PROGRAM}'
-    AND account_arguments[4] = '${LETSBONK_PLATFORM}'
-    AND tx_success = true
-    AND block_date >= DATE '2025-04-16'
-),
-usd1_trades AS (
-  SELECT
-    DATE(block_time) as trade_date,
-    tx_hash,
-    CASE
-      WHEN token_bought_address = '${USD1_MINT}' THEN token_sold_address
-      ELSE token_bought_address
-    END as bonkfun_token,
-    amount_usd
-  FROM dex_solana.trades
-  WHERE (
-    token_bought_address = '${USD1_MINT}'
-    OR token_sold_address = '${USD1_MINT}'
-  )
-  AND block_date >= DATE '2025-04-16'
-  AND amount_usd > 0
-)
-SELECT
-  t.trade_date as date,
-  COUNT(DISTINCT t.tx_hash) as num_trades,
-  COUNT(DISTINCT t.bonkfun_token) as unique_tokens,
-  COALESCE(SUM(t.amount_usd), 0) as total_volume_usd
-FROM usd1_trades t
-INNER JOIN bonkfun_tokens b ON t.bonkfun_token = b.token_mint
-GROUP BY t.trade_date
-ORDER BY t.trade_date ASC
-`
 
 interface DuneVolumeRow {
   date: string
@@ -102,41 +56,15 @@ interface DuneResultsResponse {
 }
 
 /**
- * Create or update a query on Dune Analytics, then execute it
- * This works with the free tier API
+ * Execute the saved Dune query
  */
-async function createAndExecuteQuery(sql: string): Promise<string> {
+async function executeQuery(queryId: number): Promise<string> {
   const duneApiKey = process.env.DUNE_API_KEY
   if (!duneApiKey) {
     throw new Error("DUNE_API_KEY not configured")
   }
 
-  // Step 1: Create a new query
-  console.log("[Seed] Creating query on Dune...")
-  const createResponse = await fetch(`${DUNE_API}/query`, {
-    method: "POST",
-    headers: {
-      "x-dune-api-key": duneApiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      name: "BonkFun USD1 Volume - Auto Generated",
-      query_sql: sql,
-      is_private: false,
-    }),
-  })
-
-  if (!createResponse.ok) {
-    const errorText = await createResponse.text()
-    throw new Error(`Dune create query error: ${createResponse.status} - ${errorText}`)
-  }
-
-  const createData = await createResponse.json()
-  const queryId = createData.query_id
-  console.log(`[Seed] Created query ID: ${queryId}`)
-
-  // Step 2: Execute the query
-  console.log("[Seed] Executing query...")
+  console.log(`[Seed] Executing saved query ${queryId}...`)
   const executeResponse = await fetch(`${DUNE_API}/query/${queryId}/execute`, {
     method: "POST",
     headers: {
@@ -154,6 +82,7 @@ async function createAndExecuteQuery(sql: string): Promise<string> {
   }
 
   const executeData: DuneExecuteResponse = await executeResponse.json()
+  console.log(`[Seed] Execution ID: ${executeData.execution_id}`)
   return executeData.execution_id
 }
 
@@ -238,14 +167,13 @@ async function waitForCompletion(executionId: string, maxWaitMs: number = 300000
 }
 
 /**
- * Fetch BonkFun/USD1 volume data from Dune Analytics
+ * Fetch BonkFun/USD1 volume data from Dune Analytics using saved query
  */
 async function fetchDuneHistory(): Promise<DuneVolumeRow[]> {
-  console.log("[Seed] Executing custom BonkFun/USD1 volume query...")
+  console.log(`[Seed] Fetching data from saved Dune query ${DUNE_QUERY_ID}...`)
 
-  // Create and execute the query
-  const executionId = await createAndExecuteQuery(BONKFUN_USD1_VOLUME_QUERY)
-  console.log(`[Seed] Execution ID: ${executionId}`)
+  // Execute the saved query
+  const executionId = await executeQuery(DUNE_QUERY_ID)
 
   // Wait for completion
   console.log("[Seed] Waiting for query completion...")
@@ -364,12 +292,12 @@ export async function GET() {
     return NextResponse.json({
       status: stats.count > 0 ? "seeded" : "empty",
       stats,
-      queryType: "custom_bonkfun_usd1_volume",
+      duneQueryId: DUNE_QUERY_ID,
+      duneQueryUrl: `https://dune.com/queries/${DUNE_QUERY_ID}`,
       launchLabProgram: LAUNCHLAB_PROGRAM,
       letsBonkPlatform: LETSBONK_PLATFORM,
       usd1Mint: USD1_MINT,
       hasApiKey: !!process.env.DUNE_API_KEY,
-      sqlQuery: BONKFUN_USD1_VOLUME_QUERY.trim(),
     })
   } catch (error) {
     return NextResponse.json(
