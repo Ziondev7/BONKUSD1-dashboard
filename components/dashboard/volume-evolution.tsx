@@ -309,10 +309,11 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
     }
   )
 
-  // Use currentVolume from props for 24h period to match metrics grid
-  const displayVolume = period === "24h" && currentVolume 
-    ? currentVolume 
-    : (data?.stats.totalVolume || data?.stats.current || 0)
+  // For 24h: use total volume (sum of hourly volumes)
+  // For longer periods: use current 24h volume (most recent snapshot)
+  const displayVolume = period === "24h"
+    ? (currentVolume || data?.stats.totalVolume || 0)
+    : (data?.stats.current || 0)
 
   const isPositive = (data?.stats.change ?? 0) >= 0
 
@@ -390,7 +391,8 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <p className="text-white/40 text-[10px] font-mono tracking-[0.15em] uppercase mb-1">
-              TOTAL VOLUME ({period.toUpperCase()})
+              {/* For 24H show total, for longer periods show current 24h volume */}
+              {period === "24h" ? "TOTAL VOLUME (24H)" : "24H VOLUME (NOW)"}
             </p>
             <div className="flex items-baseline gap-3">
               <span className="text-3xl font-mono font-black text-white">
@@ -412,12 +414,12 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
           {data && (
             <div className="flex items-center gap-4 text-xs font-mono">
               <div className="text-center">
-                <p className="text-white/30 mb-0.5">Peak</p>
+                <p className="text-white/30 mb-0.5">{period === "24h" ? "Peak" : "Peak 24h"}</p>
                 <p className="text-white font-bold">{formatNumber(data.stats.peak)}</p>
               </div>
               <div className="w-px h-8 bg-white/10" />
               <div className="text-center">
-                <p className="text-white/30 mb-0.5">Low</p>
+                <p className="text-white/30 mb-0.5">{period === "24h" ? "Low" : "Low 24h"}</p>
                 <p className="text-white font-bold">{formatNumber(data.stats.low)}</p>
               </div>
               <div className="w-px h-8 bg-white/10" />
