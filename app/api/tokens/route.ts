@@ -527,15 +527,44 @@ const holderCountCache = new Map<string, { holders: number; timestamp: number }>
 const HOLDER_CACHE_TTL = 30 * 60 * 1000 // 30 minutes (holder counts don't change rapidly)
 
 /**
- * Fetch holder count using Helius getTokenAccounts API
- * This returns the total number of accounts holding the token
+ * Fetch holder count from Birdeye API (most reliable, requires API key)
+ */
+async function fetchHolderCountFromBirdeye(mint: string): Promise<number> {
+  const apiKey = process.env.BIRDEYE_API_KEY
+  if (!apiKey) return 0
+
+  try {
+    const response = await fetch(
+      `https://public-api.birdeye.so/defi/token_overview?address=${mint}`,
+      {
+        headers: {
+          "X-API-KEY": apiKey,
+          "Accept": "application/json",
+        },
+      }
+    )
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success && data.data?.holder !== undefined) {
+        console.log(`[Birdeye] ${mint.slice(0, 8)}... holders: ${data.data.holder}`)
+        return data.data.holder
+      }
+    }
+  } catch (err) {
+    console.log(`[Birdeye] Error for ${mint.slice(0, 8)}...:`, err)
+  }
+  return 0
+}
+
+/**
+ * Fetch holder count using Helius getTokenAccounts API (fallback)
  */
 async function fetchHolderCountFromHelius(mint: string): Promise<number> {
   const apiKey = process.env.HELIUS_API_KEY
   if (!apiKey) return 0
 
   try {
-    // Use Helius DAS API getTokenAccounts which returns total count
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -546,16 +575,14 @@ async function fetchHolderCountFromHelius(mint: string): Promise<number> {
         params: {
           mint: mint,
           page: 1,
-          limit: 1, // We only need the total count, not the actual accounts
+          limit: 1,
         },
       }),
     })
 
     if (response.ok) {
       const data = await response.json()
-      // Debug log to see actual response
-      console.log(`[Helius] Response for ${mint.slice(0, 8)}...:`, JSON.stringify(data).slice(0, 200))
-      // Helius returns { result: { total: number, token_accounts: [...] } }
+      console.log(`[Helius] ${mint.slice(0, 8)}... response:`, JSON.stringify(data).slice(0, 150))
       if (data.result?.total !== undefined) {
         return data.result.total
       }
@@ -568,16 +595,22 @@ async function fetchHolderCountFromHelius(mint: string): Promise<number> {
 
 /**
  * Batch fetch holder counts for multiple tokens
- * Uses Helius API for accurate holder counts
+ * Uses Birdeye (primary) or Helius (fallback)
  */
 async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> {
   const holderMap = new Map<string, number>()
-  const apiKey = process.env.HELIUS_API_KEY
 
-  if (!apiKey || mints.length === 0) {
-    console.log("[API] No HELIUS_API_KEY or no mints to fetch")
+  if (mints.length === 0) return holderMap
+
+  const hasBirdeye = !!process.env.BIRDEYE_API_KEY
+  const hasHelius = !!process.env.HELIUS_API_KEY
+
+  if (!hasBirdeye && !hasHelius) {
+    console.log("[API] No BIRDEYE_API_KEY or HELIUS_API_KEY - skipping holder counts")
     return holderMap
   }
+
+  console.log(`[API] Fetching holder counts using ${hasBirdeye ? 'Birdeye' : 'Helius'}`)
 
   // Check which mints need fetching (not in cache)
   const mintsToFetch: string[] = []
@@ -595,10 +628,10 @@ async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> 
     return holderMap
   }
 
-  console.log(`[API] Fetching holder counts: ${holderMap.size} cached, ${mintsToFetch.length} to fetch via Helius`)
+  console.log(`[API] Holder counts: ${holderMap.size} cached, ${mintsToFetch.length} to fetch`)
 
-  // Process in batches to respect rate limits
-  const BATCH_SIZE = 10
+  // Process in batches
+  const BATCH_SIZE = hasBirdeye ? 5 : 10 // Birdeye has stricter rate limits
   let fetchedCount = 0
   let failedCount = 0
 
@@ -606,7 +639,15 @@ async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> 
     const batch = mintsToFetch.slice(i, i + BATCH_SIZE)
 
     const batchPromises = batch.map(async (mint) => {
-      const holders = await fetchHolderCountFromHelius(mint)
+      // Try Birdeye first if available
+      let holders = 0
+      if (hasBirdeye) {
+        holders = await fetchHolderCountFromBirdeye(mint)
+      }
+      // Fallback to Helius
+      if (holders === 0 && hasHelius) {
+        holders = await fetchHolderCountFromHelius(mint)
+      }
 
       if (holders > 0) {
         holderCountCache.set(mint, { holders, timestamp: Date.now() })
@@ -623,13 +664,13 @@ async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> 
       holderMap.set(mint, holders)
     })
 
-    // Small delay between batches
+    // Delay between batches
     if (i + BATCH_SIZE < mintsToFetch.length) {
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise(resolve => setTimeout(resolve, hasBirdeye ? 200 : 100))
     }
   }
 
-  console.log(`[API] Holder counts: ${fetchedCount} fetched, ${failedCount} failed, ${holderMap.size} total`)
+  console.log(`[API] Holder counts: ${fetchedCount} fetched, ${failedCount} failed`)
 
   return holderMap
 }
