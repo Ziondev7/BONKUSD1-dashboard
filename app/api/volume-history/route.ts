@@ -606,27 +606,44 @@ function getStoredSnapshots(period: string): VolumeSnapshot[] {
 function aggregateToWeekly(dailyData: VolumeDataPoint[]): VolumeDataPoint[] {
   if (dailyData.length === 0) return []
 
-  const weeklyMap = new Map<number, { volume: number; trades: number; poolCount: number; count: number }>()
+  // Use string keys (YYYY-MM-DD of week start) to avoid numeric precision issues
+  const weeklyMap = new Map<string, { timestamp: number; volume: number; trades: number; poolCount: number; count: number }>()
 
   for (const day of dailyData) {
     // Get the start of the week (Monday) for this day
     const date = new Date(day.timestamp)
-    const dayOfWeek = date.getUTCDay()
-    // Adjust to get Monday as start of week (0 = Sunday, so we shift)
-    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-    const weekStart = new Date(date)
-    weekStart.setUTCDate(date.getUTCDate() - daysToMonday)
-    weekStart.setUTCHours(0, 0, 0, 0)
-    const weekTimestamp = weekStart.getTime()
+    const dayOfWeek = date.getUTCDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 
-    const existing = weeklyMap.get(weekTimestamp)
+    // Calculate days to subtract to get to Monday
+    // Sunday (0) -> subtract 6 days
+    // Monday (1) -> subtract 0 days
+    // Tuesday (2) -> subtract 1 day, etc.
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+
+    // Create week start date using UTC to avoid timezone issues
+    const weekStartMs = day.timestamp - (daysFromMonday * 24 * 60 * 60 * 1000)
+    const weekStartDate = new Date(weekStartMs)
+
+    // Create a string key in YYYY-MM-DD format for the week start
+    const weekKey = `${weekStartDate.getUTCFullYear()}-${String(weekStartDate.getUTCMonth() + 1).padStart(2, '0')}-${String(weekStartDate.getUTCDate()).padStart(2, '0')}`
+
+    // Normalize the timestamp to midnight UTC
+    const normalizedTimestamp = Date.UTC(
+      weekStartDate.getUTCFullYear(),
+      weekStartDate.getUTCMonth(),
+      weekStartDate.getUTCDate(),
+      0, 0, 0, 0
+    )
+
+    const existing = weeklyMap.get(weekKey)
     if (existing) {
       existing.volume += day.volume
       existing.trades += day.trades
       existing.poolCount = Math.max(existing.poolCount, day.poolCount || 0)
       existing.count++
     } else {
-      weeklyMap.set(weekTimestamp, {
+      weeklyMap.set(weekKey, {
+        timestamp: normalizedTimestamp,
         volume: day.volume,
         trades: day.trades,
         poolCount: day.poolCount || 0,
@@ -637,9 +654,9 @@ function aggregateToWeekly(dailyData: VolumeDataPoint[]): VolumeDataPoint[] {
 
   // Convert map to array
   const weeklyData: VolumeDataPoint[] = []
-  weeklyMap.forEach((data, timestamp) => {
+  weeklyMap.forEach((data) => {
     weeklyData.push({
-      timestamp,
+      timestamp: data.timestamp,
       volume: data.volume,
       trades: data.trades,
       poolCount: data.poolCount,
@@ -649,6 +666,8 @@ function aggregateToWeekly(dailyData: VolumeDataPoint[]): VolumeDataPoint[] {
 
   // Sort by timestamp
   weeklyData.sort((a, b) => a.timestamp - b.timestamp)
+
+  console.log(`[Volume] Weekly aggregation: ${dailyData.length} daily points -> ${weeklyData.length} weekly candles`)
 
   return weeklyData
 }
