@@ -12,6 +12,7 @@ interface TopPerformersProps {
   topGainers: Token[]
   topLosers: Token[]
   onSelectToken: (token: Token) => void
+  compact?: boolean
 }
 
 const TokenLogo = memo(function TokenLogo({ 
@@ -232,9 +233,9 @@ const PerformerCard = memo(function PerformerCard({
   )
 })
 
-export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: TopPerformersProps) {
+export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken, compact = false }: TopPerformersProps) {
   if (tokens.length === 0 && topGainers.length === 0) {
-    return (
+    return compact ? null : (
       <section className="mb-10">
         <h2 className="text-lg font-bold text-white mb-5 flex items-center gap-3 font-mono">
           <Trophy className="w-5 h-5 text-bonk" />
@@ -244,6 +245,73 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
           NO DATA AVAILABLE
         </div>
       </section>
+    )
+  }
+
+  // Compact mode for Pro Mode - Horizontal layout with gainers and losers
+  if (compact) {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        {/* Compact Gainers */}
+        <div className="glass-card-solid p-3 pro-bento-item">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingUp className="w-3 h-3 text-success" />
+            <span className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-wide">Gainers</span>
+          </div>
+          <div className="space-y-1.5">
+            {topGainers.slice(0, 3).map((token, i) => (
+              <div
+                key={`compact-gainer-${token.id}`}
+                onClick={() => onSelectToken(token)}
+                className="flex items-center gap-2 p-1.5 rounded bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] cursor-pointer transition-all"
+              >
+                <span className={`text-[9px] font-bold px-1 py-0.5 rounded font-mono ${
+                  i === 0 ? "bg-success/20 text-success" : "bg-white/[0.06] text-white/50"
+                }`}>
+                  #{i + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-white truncate">{token.name}</p>
+                  <p className="text-[9px] text-white/40 font-mono">${token.symbol}</p>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-success">
+                  +{token.change24h.toFixed(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Compact Losers */}
+        <div className="glass-card-solid p-3 pro-bento-item">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingDown className="w-3 h-3 text-danger" />
+            <span className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-wide">Losers</span>
+          </div>
+          <div className="space-y-1.5">
+            {topLosers.slice(0, 3).map((token, i) => (
+              <div
+                key={`compact-loser-${token.id}`}
+                onClick={() => onSelectToken(token)}
+                className="flex items-center gap-2 p-1.5 rounded bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] cursor-pointer transition-all"
+              >
+                <span className={`text-[9px] font-bold px-1 py-0.5 rounded font-mono ${
+                  i === 0 ? "bg-danger/20 text-danger" : "bg-white/[0.06] text-white/50"
+                }`}>
+                  #{i + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-white truncate">{token.name}</p>
+                  <p className="text-[9px] text-white/40 font-mono">${token.symbol}</p>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-danger">
+                  {token.change24h.toFixed(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     )
   }
 

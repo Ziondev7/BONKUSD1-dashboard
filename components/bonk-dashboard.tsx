@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from "framer-motion"
 import dynamic from "next/dynamic"
 import { useTokens, useFavorites, useSoundPreference } from "@/hooks/use-tokens"
 import { ErrorBoundary } from "@/components/error-boundary"
-import { sanitizeSearchInput } from "@/lib/utils"
+import { sanitizeSearchInput, cn } from "@/lib/utils"
 import { MetricsGrid } from "./dashboard/metrics-grid"
+import { useProMode } from "@/components/providers/pro-mode-provider"
 
 // Dynamic import FloatingNav with SSR disabled to prevent hydration mismatch
 // (status indicator depends on client-side data fetching)
@@ -28,6 +29,9 @@ import type { Token, BannerState } from "@/lib/types"
 const TOKENS_PER_PAGE = 50
 
 export function BonkDashboard() {
+  // Pro Mode state
+  const { isProMode } = useProMode()
+
   // Custom hooks for data fetching
   const { enabled: soundEnabled, toggle: toggleSound } = useSoundPreference()
   const { tokens, isLoading, status, metrics, lastRefresh, refresh, apiHealth } = useTokens({
@@ -222,7 +226,10 @@ export function BonkDashboard() {
   }, [quickFilter, showFavoritesOnly, minVolume, minLiquidity, searchQuery])
 
   return (
-    <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
+    <div className={cn(
+      "bg-background text-foreground relative",
+      isProMode ? "h-screen overflow-hidden" : "min-h-screen overflow-hidden"
+    )}>
       {/* Grain texture overlay */}
       <div className="grain-overlay" aria-hidden="true" />
 
@@ -254,75 +261,162 @@ export function BonkDashboard() {
         totalVolume={metrics.totalVolume}
       />
 
-      {/* Main Content */}
-      <main className="relative z-10 max-w-[1600px] mx-auto px-4 md:px-6 py-6 pt-36">
-        <ErrorBoundary>
-          {/* Error Banner */}
-          {banner && (
-            <InfoBanner banner={banner} onDismiss={() => setBanner(null)} />
-          )}
+      {/* Main Content - Standard Mode */}
+      {!isProMode && (
+        <main className="relative z-10 max-w-[1600px] mx-auto px-4 md:px-6 py-6 pt-36">
+          <ErrorBoundary>
+            {/* Error Banner */}
+            {banner && (
+              <InfoBanner banner={banner} onDismiss={() => setBanner(null)} />
+            )}
 
-          {/* Metrics Grid */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} />
-          </motion.div>
+            {/* Metrics Grid */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+            >
+              <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} />
+            </motion.div>
 
-          {/* Volume Evolution Chart */}
-          <VolumeEvolution currentVolume={metrics.totalVolume} />
+            {/* Volume Evolution Chart */}
+            <VolumeEvolution currentVolume={metrics.totalVolume} />
 
-          {/* Launchpad Volume Chart */}
-          <LaunchpadVolume />
+            {/* Launchpad Volume Chart */}
+            <LaunchpadVolume />
 
-          {/* Top Performers */}
-          <TopPerformers
-            tokens={tokens.slice(0, 3)}
-            topGainers={topGainers}
-            topLosers={topLosers}
-            onSelectToken={handleSelectToken}
-          />
-
-          {/* Token Table Section */}
-          <div ref={tokenTableRef} className="scroll-mt-32">
-            <TokenFilters
-              sortBy={sortBy}
-              onSortChange={(v) => handleFilterChange(setSortBy, v)}
-              searchQuery={searchQuery}
-              onSearchChange={handleSearchChange}
-              quickFilter={quickFilter}
-              onQuickFilterChange={(v) => handleFilterChange(setQuickFilter, v)}
-              showFavoritesOnly={showFavoritesOnly}
-              onToggleFavorites={() => handleFilterChange(setShowFavoritesOnly, !showFavoritesOnly)}
-              favoritesCount={favoritesCount}
-              minVolume={minVolume}
-              onMinVolumeChange={(v) => handleFilterChange(setMinVolume, v)}
-              minLiquidity={minLiquidity}
-              onMinLiquidityChange={(v) => handleFilterChange(setMinLiquidity, v)}
-            />
-
-            <TokenTable
-              tokens={paginatedTokens}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalTokens={filteredTokens.length}
-              favorites={favorites}
-              onToggleFavorite={toggleFavorite}
-              sortBy={sortBy}
-              onSortChange={(v) => handleFilterChange(setSortBy, v)}
+            {/* Top Performers */}
+            <TopPerformers
+              tokens={tokens.slice(0, 3)}
+              topGainers={topGainers}
+              topLosers={topLosers}
               onSelectToken={handleSelectToken}
-              onOpenTradeModal={handleOpenTradeModal}
-              isLoading={isLoading}
             />
-          </div>
 
-          {/* Footer */}
-          <DashboardFooter />
-        </ErrorBoundary>
-      </main>
+            {/* Token Table Section */}
+            <div ref={tokenTableRef} className="scroll-mt-32">
+              <TokenFilters
+                sortBy={sortBy}
+                onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                searchQuery={searchQuery}
+                onSearchChange={handleSearchChange}
+                quickFilter={quickFilter}
+                onQuickFilterChange={(v) => handleFilterChange(setQuickFilter, v)}
+                showFavoritesOnly={showFavoritesOnly}
+                onToggleFavorites={() => handleFilterChange(setShowFavoritesOnly, !showFavoritesOnly)}
+                favoritesCount={favoritesCount}
+                minVolume={minVolume}
+                onMinVolumeChange={(v) => handleFilterChange(setMinVolume, v)}
+                minLiquidity={minLiquidity}
+                onMinLiquidityChange={(v) => handleFilterChange(setMinLiquidity, v)}
+              />
+
+              <TokenTable
+                tokens={paginatedTokens}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                totalTokens={filteredTokens.length}
+                favorites={favorites}
+                onToggleFavorite={toggleFavorite}
+                sortBy={sortBy}
+                onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                onSelectToken={handleSelectToken}
+                onOpenTradeModal={handleOpenTradeModal}
+                isLoading={isLoading}
+              />
+            </div>
+
+            {/* Footer */}
+            <DashboardFooter />
+          </ErrorBoundary>
+        </main>
+      )}
+
+      {/* Main Content - Pro Mode (Bloomberg-style grid layout) */}
+      {isProMode && (
+        <main className="relative z-10 h-[calc(100vh-120px)] mt-[120px] px-2 pb-2">
+          <ErrorBoundary>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+              className="h-full grid grid-cols-[1fr_400px] gap-2"
+            >
+              {/* Left Panel - Charts & Metrics (scrollable bento grid) */}
+              <div className="h-full overflow-y-auto overflow-x-hidden pro-scroll pr-2">
+                <div className="grid grid-cols-2 gap-2 auto-rows-min">
+                  {/* Metrics Row - Compact */}
+                  <div className="col-span-2">
+                    <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} compact />
+                  </div>
+
+                  {/* Charts Row - Side by Side */}
+                  <div className="col-span-1">
+                    <VolumeEvolution currentVolume={metrics.totalVolume} compact />
+                  </div>
+                  <div className="col-span-1">
+                    <LaunchpadVolume compact />
+                  </div>
+
+                  {/* Top Performers - Compact */}
+                  <div className="col-span-2">
+                    <TopPerformers
+                      tokens={tokens.slice(0, 3)}
+                      topGainers={topGainers}
+                      topLosers={topLosers}
+                      onSelectToken={handleSelectToken}
+                      compact
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Panel - Token Table (scrollable list) */}
+              <div className="h-full flex flex-col glass-card-solid rounded-lg overflow-hidden">
+                {/* Compact Filters Header */}
+                <div className="flex-shrink-0 p-2 border-b border-white/[0.06]">
+                  <TokenFilters
+                    sortBy={sortBy}
+                    onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                    searchQuery={searchQuery}
+                    onSearchChange={handleSearchChange}
+                    quickFilter={quickFilter}
+                    onQuickFilterChange={(v) => handleFilterChange(setQuickFilter, v)}
+                    showFavoritesOnly={showFavoritesOnly}
+                    onToggleFavorites={() => handleFilterChange(setShowFavoritesOnly, !showFavoritesOnly)}
+                    favoritesCount={favoritesCount}
+                    minVolume={minVolume}
+                    onMinVolumeChange={(v) => handleFilterChange(setMinVolume, v)}
+                    minLiquidity={minLiquidity}
+                    onMinLiquidityChange={(v) => handleFilterChange(setMinLiquidity, v)}
+                    compact
+                  />
+                </div>
+
+                {/* Scrollable Token List */}
+                <div className="flex-1 overflow-y-auto overflow-x-hidden pro-scroll">
+                  <TokenTable
+                    tokens={paginatedTokens}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalTokens={filteredTokens.length}
+                    favorites={favorites}
+                    onToggleFavorite={toggleFavorite}
+                    sortBy={sortBy}
+                    onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                    onSelectToken={handleSelectToken}
+                    onOpenTradeModal={handleOpenTradeModal}
+                    isLoading={isLoading}
+                    compact
+                  />
+                </div>
+              </div>
+            </motion.div>
+          </ErrorBoundary>
+        </main>
+      )}
 
       {/* Token Detail Drawer */}
       <TokenDetailDrawer
@@ -339,8 +433,8 @@ export function BonkDashboard() {
         onConfirm={() => {}}
       />
 
-      {/* Back to Top */}
-      <BackToTop />
+      {/* Back to Top - Only in standard mode */}
+      {!isProMode && <BackToTop />}
     </div>
   )
 }

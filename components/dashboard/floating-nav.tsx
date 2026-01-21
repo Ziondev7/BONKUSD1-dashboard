@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { RefreshCw, Volume2, VolumeX, Filter, Zap, Activity } from "lucide-react"
+import { RefreshCw, Volume2, VolumeX, Filter, Zap, Activity, LayoutGrid, Rows3 } from "lucide-react"
 import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import type { StatusState } from "@/lib/types"
 import { formatCompactNumber } from "@/lib/utils"
+import { useProMode } from "@/components/providers/pro-mode-provider"
 
 interface FloatingNavProps {
   status: StatusState
@@ -45,6 +46,7 @@ export function FloatingNav({
   const [scrolled, setScrolled] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const { isProMode, toggleProMode } = useProMode()
 
   // Prevent hydration mismatch by only rendering dynamic content after mount
   useEffect(() => {
@@ -208,8 +210,27 @@ export function FloatingNav({
               </span>
             )}
 
-            {/* Sound Toggle */}
-            
+            {/* Pro Mode Toggle */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={toggleProMode}
+              className={`hidden lg:flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                isProMode
+                  ? "bg-bonk/20 border-bonk/40 text-bonk"
+                  : "bg-white/[0.03] border-white/[0.06] text-white/60 hover:bg-white/[0.06] hover:border-white/10"
+              }`}
+              title={isProMode ? "Switch to Standard Mode" : "Switch to Pro Mode"}
+            >
+              {isProMode ? (
+                <Rows3 size={16} />
+              ) : (
+                <LayoutGrid size={16} />
+              )}
+              <span className="text-[10px] font-bold tracking-wider uppercase">
+                {isProMode ? "PRO" : "STD"}
+              </span>
+            </motion.button>
 
             {/* Refresh Button */}
             <motion.button

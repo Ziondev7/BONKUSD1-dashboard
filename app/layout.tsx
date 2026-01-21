@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { Inter, JetBrains_Mono, Space_Grotesk } from "next/font/google"
+import { ProModeProvider } from "@/components/providers/pro-mode-provider"
 import "./globals.css"
 
 const inter = Inter({
@@ -67,7 +68,9 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="font-sans antialiased">
-        {children}
+        <ProModeProvider>
+          {children}
+        </ProModeProvider>
       </body>
     </html>
   )

@@ -10,9 +10,10 @@ interface MetricsGridProps {
   metrics: MetricsSnapshot
   tokens: Token[]
   isLoading?: boolean
+  compact?: boolean
 }
 
-export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridProps) {
+export function MetricsGrid({ metrics, tokens, isLoading = false, compact = false }: MetricsGridProps) {
   const { marketSentiment, topMover } = useMemo(() => {
     if (tokens.length === 0) return { marketSentiment: 50, topMover: null }
     
@@ -66,6 +67,50 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
     },
   ]
 
+  // Compact mode for Pro Mode
+  if (compact) {
+    return (
+      <div className="grid grid-cols-4 gap-2">
+        {cards.map((card) => {
+          const Icon = card.icon
+          const colorClass = card.color === "bonk" ? "text-bonk" : "text-success"
+
+          return (
+            <div
+              key={card.id}
+              className="glass-card-solid p-3 pro-bento-item"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Icon className={`w-3 h-3 ${colorClass}`} />
+                <span className="text-white/40 text-[8px] font-mono tracking-[0.1em] uppercase">
+                  {card.label}
+                </span>
+              </div>
+
+              <p className="text-lg font-black font-mono text-white tracking-tight tabular-nums">
+                {isLoading ? (
+                  <span className="inline-block w-16 h-5 bg-white/[0.06] rounded animate-pulse" />
+                ) : (
+                  card.value
+                )}
+              </p>
+
+              {card.subValue && (
+                <p className="text-white/30 text-[10px] font-mono mt-0.5 truncate">
+                  {isLoading ? (
+                    <span className="inline-block w-14 h-2 bg-white/[0.04] rounded animate-pulse" />
+                  ) : (
+                    card.subValue
+                  )}
+                </p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6 mb-10">
       {/* Main Metrics Grid */}
@@ -91,7 +136,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
                   {card.label}
                 </span>
               </div>
-              
+
               <p className="text-2xl md:text-3xl font-black font-mono text-white tracking-tight tabular-nums">
                 {isLoading ? (
                   <span className="inline-block w-24 h-8 bg-white/[0.06] rounded animate-pulse" />
@@ -99,7 +144,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
                   card.value
                 )}
               </p>
-              
+
               {card.subValue && (
                 <p className="text-white/30 text-xs font-mono mt-1.5 truncate">
                   {isLoading ? (
@@ -115,7 +160,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
       </div>
 
       {/* Market Sentiment Bar */}
-      
+
     </div>
   )
 }

@@ -257,7 +257,11 @@ function LaunchpadChart({
   )
 }
 
-export function LaunchpadVolume() {
+interface LaunchpadVolumeProps {
+  compact?: boolean
+}
+
+export function LaunchpadVolume({ compact = false }: LaunchpadVolumeProps) {
   const [period, setPeriod] = useState("daily")
 
   const { data, error, isLoading } = useSWR<LaunchpadVolumeResponse>(
@@ -271,6 +275,96 @@ export function LaunchpadVolume() {
 
   const displayVolume = data?.stats.totalVolume || data?.stats.current || 0
   const isPositive = (data?.stats.change ?? 0) >= 0
+
+  // Compact mode for Pro Mode
+  if (compact) {
+    return (
+      <div className="glass-card-solid p-3 pro-bento-item h-full flex flex-col">
+        {/* Compact Header */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Rocket className="w-3 h-3 text-success" />
+            <span className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-wide">Launchpad</span>
+          </div>
+          {/* Compact Period Selector */}
+          <div className="flex items-center gap-0.5 bg-white/[0.03] border border-white/[0.06] rounded p-0.5">
+            {PERIODS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setPeriod(p.id)}
+                className={cn(
+                  "px-2 py-0.5 rounded text-[9px] font-mono font-bold transition-all",
+                  period === p.id
+                    ? "bg-success text-black"
+                    : "text-white/40 hover:text-white"
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Volume Value */}
+        <div className="flex items-baseline gap-2 mb-2">
+          <span className="text-xl font-mono font-black text-white">
+            ${displayVolume > 0 ? formatCompactNumber(displayVolume) : "—"}
+          </span>
+          {data && (
+            <span className={cn(
+              "flex items-center gap-0.5 text-[10px] font-mono font-bold",
+              isPositive ? "text-success" : "text-danger"
+            )}>
+              {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+              {isPositive ? "+" : ""}{data.stats.change.toFixed(1)}%
+            </span>
+          )}
+        </div>
+
+        {/* Compact Legend */}
+        {data && data.history.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {CATEGORIES.map((cat) => {
+              const total = data.stats.categoryTotals?.[cat] || 0
+              if (total === 0) return null
+              return (
+                <div key={cat} className="flex items-center gap-1">
+                  <div
+                    className="w-2 h-2 rounded-sm"
+                    style={{ backgroundColor: CATEGORY_HEX[cat] }}
+                  />
+                  <span className="text-[9px] font-mono text-white/50">
+                    {CATEGORY_COLORS[cat].label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Compact Chart */}
+        <div className="flex-1 min-h-0">
+          {isLoading ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="w-4 h-4 border-2 border-success border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : error ? (
+            <div className="h-full flex items-center justify-center text-danger font-mono text-[10px]">
+              Failed to load
+            </div>
+          ) : data && data.history.length > 0 ? (
+            <div className="h-[140px]">
+              <LaunchpadChart data={data.history} period={period} />
+            </div>
+          ) : (
+            <div className="h-full flex items-center justify-center text-white/30 font-mono text-[10px]">
+              No data
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <motion.section

@@ -30,6 +30,7 @@ interface TokenFiltersProps {
   onMinVolumeChange: (value: number) => void
   minLiquidity: number
   onMinLiquidityChange: (value: number) => void
+  compact?: boolean
 }
 
 const QUICK_FILTERS = [
@@ -77,6 +78,7 @@ export function TokenFilters({
   onMinVolumeChange,
   minLiquidity,
   onMinLiquidityChange,
+  compact = false,
 }: TokenFiltersProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
@@ -94,6 +96,75 @@ export function TokenFilters({
     onMinVolumeChange(0)
     onMinLiquidityChange(0)
     onSearchChange("")
+  }
+
+  // Compact mode for Pro Mode
+  if (compact) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Compact Search */}
+        <div className="relative flex-1 min-w-[120px] max-w-[200px]">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search..."
+            className="w-full pl-7 pr-2 py-1.5 bg-white/[0.03] border border-white/[0.06] rounded font-mono text-[10px] text-white placeholder:text-white/30 focus:outline-none focus:border-bonk/30 transition-all"
+          />
+        </div>
+
+        {/* Compact Quick Filters */}
+        <div className="flex items-center gap-1">
+          {QUICK_FILTERS.slice(0, 4).map((filter) => {
+            const Icon = filter.icon
+            const isActive = quickFilter === filter.id
+            return (
+              <button
+                key={filter.id}
+                onClick={() => onQuickFilterChange(filter.id)}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all",
+                  isActive
+                    ? "bg-bonk text-black"
+                    : "bg-white/[0.03] text-white/50 hover:text-white hover:bg-white/[0.06]"
+                )}
+              >
+                {Icon && <Icon size={10} className={isActive ? "" : filter.color} />}
+                {filter.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Compact Sort */}
+        <select
+          value={sortBy}
+          onChange={(e) => onSortChange(e.target.value)}
+          className="appearance-none px-2 py-1 bg-white/[0.03] border border-white/[0.06] rounded font-mono text-[9px] text-white focus:outline-none cursor-pointer"
+        >
+          {SORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value} className="bg-[#0a0a0c]">
+              {option.label}
+            </option>
+          ))}
+        </select>
+
+        {/* Favorites Toggle */}
+        <button
+          onClick={onToggleFavorites}
+          className={cn(
+            "flex items-center gap-1 px-2 py-1 rounded text-[9px] font-mono font-bold transition-all",
+            showFavoritesOnly
+              ? "bg-bonk text-black"
+              : "bg-white/[0.03] text-white/50 hover:text-white"
+          )}
+        >
+          <Star size={10} className={showFavoritesOnly ? "" : "text-bonk"} />
+          {favoritesCount > 0 && <span>({favoritesCount})</span>}
+        </button>
+      </div>
+    )
   }
 
   return (

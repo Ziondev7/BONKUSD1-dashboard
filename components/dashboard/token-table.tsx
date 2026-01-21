@@ -35,6 +35,7 @@ interface TokenTableProps {
   onSelectToken: (token: Token) => void
   onOpenTradeModal: (token: Token) => void
   isLoading?: boolean
+  compact?: boolean
 }
 
 // Memoized token logo component
@@ -204,6 +205,7 @@ export function TokenTable({
   onSelectToken,
   onOpenTradeModal,
   isLoading = false,
+  compact = false,
 }: TokenTableProps) {
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
 
@@ -261,6 +263,140 @@ export function TokenTable({
       </div>
     </th>
   )
+
+  // Compact mode for Pro Mode - list view with minimal info
+  if (compact) {
+    return (
+      <div className="h-full flex flex-col">
+        {/* Compact Header */}
+        <div className="flex-shrink-0 px-3 py-2 border-b border-white/[0.04] bg-[rgba(5,5,5,0.95)] sticky top-0 z-10">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono font-bold text-white/60">{totalTokens} TOKENS</span>
+            {totalPages > 1 && (
+              <span className="text-[9px] text-white/30 font-mono">
+                Page {currentPage}/{totalPages}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Compact Token List */}
+        <div className="flex-1 overflow-y-auto pro-scroll">
+          {isLoading ? (
+            <div className="space-y-1 p-2">
+              {[...Array(15)].map((_, i) => (
+                <div key={i} className="h-12 skeleton rounded" />
+              ))}
+            </div>
+          ) : tokens.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-white/30 font-mono text-xs">
+              No tokens found
+            </div>
+          ) : (
+            <div className="divide-y divide-white/[0.03]">
+              {tokens.map((token, i) => {
+                const isPositive = token.change24h >= 0
+                const isFavorite = favorites.has(token.address)
+                const globalIndex = (currentPage - 1) * 50 + i
+
+                return (
+                  <div
+                    key={token.address}
+                    onClick={() => onSelectToken(token)}
+                    className="flex items-center gap-2 px-2 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors pro-token-row"
+                  >
+                    {/* Rank & Favorite */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleFavorite(token.address)
+                      }}
+                      className="text-white/30 hover:text-bonk transition-colors flex-shrink-0"
+                    >
+                      <Star className={cn("w-3 h-3", isFavorite && "fill-bonk text-bonk")} />
+                    </button>
+                    <span className="text-white/30 font-mono text-[9px] w-5 flex-shrink-0">
+                      {globalIndex + 1}
+                    </span>
+
+                    {/* Token Logo - Small */}
+                    <div className="w-7 h-7 rounded bg-white/[0.04] border border-white/[0.08] overflow-hidden flex-shrink-0 flex items-center justify-center text-sm">
+                      {token.imageUrl ? (
+                        <Image
+                          src={token.imageUrl}
+                          alt={token.name}
+                          width={28}
+                          height={28}
+                          className="object-cover"
+                          unoptimized
+                        />
+                      ) : (
+                        token.emoji
+                      )}
+                    </div>
+
+                    {/* Token Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-bold text-white truncate">{token.name}</p>
+                      <p className="text-[9px] text-white/40 font-mono">${token.symbol}</p>
+                    </div>
+
+                    {/* Price & Change */}
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-[10px] font-mono text-white tabular-nums">
+                        {formatNumber(token.mcap)}
+                      </p>
+                      <p className={cn(
+                        "text-[10px] font-mono font-bold tabular-nums flex items-center justify-end gap-0.5",
+                        isPositive ? "text-success" : "text-danger"
+                      )}>
+                        {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                        {isPositive ? "+" : ""}{token.change24h.toFixed(1)}%
+                      </p>
+                    </div>
+
+                    {/* Trade Button - Compact */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenTradeModal(token)
+                      }}
+                      className="flex-shrink-0 px-2 py-1 bg-bonk hover:bg-bonk/90 text-black rounded text-[9px] font-bold transition-all"
+                    >
+                      TRADE
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Compact Pagination */}
+        {totalPages > 1 && (
+          <div className="flex-shrink-0 px-2 py-2 border-t border-white/[0.04] flex items-center justify-center gap-1">
+            <button
+              onClick={() => onPageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="p-1 rounded bg-white/[0.03] hover:bg-white/[0.06] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronLeft className="w-3 h-3" />
+            </button>
+            <span className="text-[9px] font-mono text-white/50 px-2">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => onPageChange(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="p-1 rounded bg-white/[0.03] hover:bg-white/[0.06] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+            >
+              <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="glass-card-solid overflow-hidden">
