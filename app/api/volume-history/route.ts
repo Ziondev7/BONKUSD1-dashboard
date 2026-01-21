@@ -175,10 +175,11 @@ async function fetchBonkFunTokenList(): Promise<Set<string>> {
     console.log("[Volume] Fetching BonkFun token list from Dune...")
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 15000)
+    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout for large result set
 
+    // Fetch all tokens (up to 150k) - query now only returns USD1 paired tokens
     const response = await fetch(
-      `${DUNE_API}/query/${DUNE_TOKEN_LIST_QUERY_ID}/results?limit=10000`,
+      `${DUNE_API}/query/${DUNE_TOKEN_LIST_QUERY_ID}/results?limit=150000`,
       {
         signal: controller.signal,
         headers: {
