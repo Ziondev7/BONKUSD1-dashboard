@@ -279,16 +279,16 @@ export function TokenTable({
         
         <div className="flex items-center gap-3 text-xs font-mono text-white/40">
           <div className="flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-success" />
-            <span>Safe</span>
+            <Users className="w-3 h-3 text-success" />
+            <span>100+ holders</span>
           </div>
           <div className="flex items-center gap-1">
-            <Shield className="w-3 h-3 text-bonk" />
-            <span>Caution</span>
+            <Users className="w-3 h-3 text-bonk" />
+            <span>20-99</span>
           </div>
           <div className="flex items-center gap-1">
-            <ShieldAlert className="w-3 h-3 text-danger" />
-            <span>Risky</span>
+            <Users className="w-3 h-3 text-white/30" />
+            <span>&lt;20</span>
           </div>
         </div>
       </div>
