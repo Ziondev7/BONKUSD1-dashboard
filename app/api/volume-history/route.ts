@@ -57,7 +57,8 @@ interface CacheEntry {
   period: string
   synthetic: boolean
   totalVolume24h: number
-  poolCount: number
+  poolCount: number // Unique tokens that traded in the period (historical) or active pools (live)
+  livePoolCount?: number // Current active pools from Raydium (optional)
   ohlcvCoverage: number // Percentage of volume covered by real OHLCV
   source: "kv" | "dune" | "raydium" | "synthetic"
 }
@@ -712,6 +713,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   synthetic: boolean
   totalVolume24h: number
   poolCount: number
+  livePoolCount?: number
   ohlcvCoverage: number
   source: "kv" | "dune" | "raydium" | "synthetic"
 }> {
@@ -749,13 +751,20 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       }
     }
 
-    console.log(`[Volume] Using KV data: ${finalData.length} data points, $${totalVolume24h.toLocaleString()} 24h volume`)
+    // For historical periods (7D, 1M, ALL), use the unique tokens count from KV
+    // This shows how many different tokens traded during that period
+    // For 24H, we'll use live pool count from Raydium (handled in fallback path)
+    const historicalPoolCount = kvData.uniqueTokens
+    const livePoolCount = todayLive?.poolCount || historicalPoolCount
+
+    console.log(`[Volume] Using KV data: ${finalData.length} data points, $${totalVolume24h.toLocaleString()} 24h volume, ${historicalPoolCount} unique tokens`)
 
     return {
       data: finalData,
       synthetic: false,
       totalVolume24h: Math.round(totalVolume24h),
-      poolCount: todayLive?.poolCount || kvData.uniqueTokens,
+      poolCount: historicalPoolCount, // Always use historical unique tokens for KV data
+      livePoolCount, // Also include live count for UI if needed
       ohlcvCoverage: 100,
       source: "kv",
     }
@@ -788,7 +797,8 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
         data,
         synthetic: false,
         totalVolume24h: Math.round(latestDayVolume),
-        poolCount: uniqueTokens,
+        poolCount: uniqueTokens, // Historical unique tokens count
+        // livePoolCount not available from Dune fallback
         ohlcvCoverage: 100,
         source: "dune",
       }
@@ -805,7 +815,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 
   if (pools.length === 0 || totalVolume24h === 0) {
     console.log("[Volume] No BONK.fun/USD1 pools found")
-    return { data: [], synthetic: true, totalVolume24h: 0, poolCount: 0, ohlcvCoverage: 0, source: "synthetic" }
+    return { data: [], synthetic: true, totalVolume24h: 0, poolCount: 0, livePoolCount: 0, ohlcvCoverage: 0, source: "synthetic" }
   }
 
   // Record snapshot for historical tracking
@@ -909,7 +919,8 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       data: scaledData,
       synthetic: false,
       totalVolume24h,
-      poolCount: pools.length,
+      poolCount: pools.length, // For 24H, this is live active pools
+      livePoolCount: pools.length,
       ohlcvCoverage,
       source: "raydium",
     }
@@ -925,6 +936,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
     synthetic: true,
     totalVolume24h,
     poolCount: pools.length,
+    livePoolCount: pools.length,
     ohlcvCoverage: 0,
     source: "synthetic",
   }
@@ -1081,6 +1093,7 @@ export async function GET(request: Request) {
       cached: true,
       synthetic: cached.synthetic,
       poolCount: cached.poolCount,
+      livePoolCount: cached.livePoolCount,
       ohlcvCoverage: cached.ohlcvCoverage,
       source: cached.source,
     })
@@ -1092,6 +1105,7 @@ export async function GET(request: Request) {
     synthetic,
     totalVolume24h,
     poolCount,
+    livePoolCount,
     ohlcvCoverage,
     source,
   } = await fetchBonkFunVolumeHistory(period)
@@ -1104,6 +1118,7 @@ export async function GET(request: Request) {
     synthetic,
     totalVolume24h,
     poolCount,
+    livePoolCount,
     ohlcvCoverage,
     source,
   })
@@ -1116,6 +1131,7 @@ export async function GET(request: Request) {
     cached: false,
     synthetic,
     poolCount,
+    livePoolCount,
     ohlcvCoverage,
     source,
   })
