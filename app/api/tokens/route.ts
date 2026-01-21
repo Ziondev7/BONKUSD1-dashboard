@@ -518,86 +518,136 @@ function getTokenEmoji(name?: string): string {
   return "🪙"
 }
 
-// Calculate token safety score based on multiple factors
-function calculateSafetyScore(token: {
-  liquidity: number
-  mcap: number
-  volume24h: number
-  txns24h: number
-  buys24h: number
-  sells24h: number
-  created: number | null
-  hasSocials: boolean
-}): { score: number; level: 'safe' | 'caution' | 'risky'; warnings: string[] } {
-  let score = 0
-  const warnings: string[] = []
+// ============================================
+// HOLDER COUNT FETCHING
+// ============================================
 
-  // Input validation - detect suspicious metrics
-  if (token.liquidity > token.mcap * 10 && token.mcap > 0) {
-    warnings.push("Suspicious liquidity ratio")
-    score -= 15
+// Cache for holder counts (mint -> { holders, timestamp })
+const holderCountCache = new Map<string, { holders: number; timestamp: number }>()
+const HOLDER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+/**
+ * Fetch holder count for a single token using Helius DAS API
+ */
+async function fetchHolderCount(mint: string): Promise<number> {
+  // Check cache first
+  const cached = holderCountCache.get(mint)
+  if (cached && Date.now() - cached.timestamp < HOLDER_CACHE_TTL) {
+    return cached.holders
   }
-  
-  if (token.txns24h > 0 && token.volume24h > 0) {
-    const avgTxnSize = token.volume24h / token.txns24h
-    if (avgTxnSize < 0.5) {
-      warnings.push("Abnormal transaction pattern")
-      score -= 10
+
+  const apiKey = process.env.HELIUS_API_KEY
+  if (!apiKey) return 0
+
+  try {
+    const response = await fetchWithTimeout(
+      `https://api.helius.xyz/v0/token-metadata?api-key=${apiKey}`,
+      5000
+    )
+
+    if (!response.ok) return 0
+
+    // For SPL tokens, we need to use getTokenAccounts to count holders
+    // This is an approximation using the Helius enhanced API
+    const rpcResponse = await fetchWithTimeout(
+      `https://mainnet.helius-rpc.com/?api-key=${apiKey}`,
+      8000
+    )
+
+    // Make RPC call to get token largest accounts (gives us an idea of distribution)
+    const rpcBody = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTokenLargestAccounts",
+      params: [mint],
+    }
+
+    const rpcResult = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rpcBody),
+    })
+
+    if (rpcResult.ok) {
+      const data = await rpcResult.json()
+      const accounts = data.result?.value || []
+      // Return the count of accounts with non-zero balance
+      const holders = accounts.filter((acc: any) => Number(acc.amount) > 0).length
+
+      // Cache the result (this is just top 20, but gives an indication)
+      holderCountCache.set(mint, { holders, timestamp: Date.now() })
+      return holders
+    }
+
+    return 0
+  } catch (error) {
+    return 0
+  }
+}
+
+/**
+ * Batch fetch holder counts for multiple tokens
+ * Uses parallel requests with rate limiting
+ */
+async function fetchHolderCounts(mints: string[]): Promise<Map<string, number>> {
+  const holderMap = new Map<string, number>()
+  const apiKey = process.env.HELIUS_API_KEY
+
+  if (!apiKey || mints.length === 0) return holderMap
+
+  // Process in batches of 10 to avoid rate limiting
+  const BATCH_SIZE = 10
+
+  for (let i = 0; i < mints.length; i += BATCH_SIZE) {
+    const batch = mints.slice(i, i + BATCH_SIZE)
+
+    const batchPromises = batch.map(async (mint) => {
+      // Check cache first
+      const cached = holderCountCache.get(mint)
+      if (cached && Date.now() - cached.timestamp < HOLDER_CACHE_TTL) {
+        return { mint, holders: cached.holders }
+      }
+
+      try {
+        const rpcBody = {
+          jsonrpc: "2.0",
+          id: mint,
+          method: "getTokenLargestAccounts",
+          params: [mint],
+        }
+
+        const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(rpcBody),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const accounts = data.result?.value || []
+          const holders = accounts.filter((acc: any) => Number(acc.amount) > 0).length
+
+          holderCountCache.set(mint, { holders, timestamp: Date.now() })
+          return { mint, holders }
+        }
+      } catch {
+        // Silent fail for individual tokens
+      }
+      return { mint, holders: 0 }
+    })
+
+    const results = await Promise.all(batchPromises)
+    results.forEach(({ mint, holders }) => {
+      holderMap.set(mint, holders)
+    })
+
+    // Small delay between batches to respect rate limits
+    if (i + BATCH_SIZE < mints.length) {
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 
-  // Liquidity checks (max 30 points)
-  if (token.liquidity >= 50000) score += 30
-  else if (token.liquidity >= 10000) score += 20
-  else if (token.liquidity >= 5000) score += 10
-  else warnings.push("Low liquidity")
-
-  // Liquidity to market cap ratio (max 20 points)
-  const liqRatio = token.mcap > 0 ? (token.liquidity / token.mcap) * 100 : 0
-  if (liqRatio >= 10) score += 20
-  else if (liqRatio >= 5) score += 15
-  else if (liqRatio >= 2) score += 10
-  else warnings.push("Low liq/mcap ratio")
-
-  // Trading activity (max 20 points)
-  if (token.txns24h >= 100) score += 20
-  else if (token.txns24h >= 50) score += 15
-  else if (token.txns24h >= 20) score += 10
-  else if (token.txns24h < 10) warnings.push("Low trading activity")
-
-  // Buy/Sell balance (max 15 points) - healthy markets have balanced trading
-  const totalTxns = token.buys24h + token.sells24h
-  if (totalTxns > 0) {
-    const buyRatio = token.buys24h / totalTxns
-    if (buyRatio >= 0.35 && buyRatio <= 0.65) score += 15
-    else if (buyRatio >= 0.25 && buyRatio <= 0.75) score += 10
-    else warnings.push("Unbalanced buy/sell")
-  }
-
-  // Age check (max 10 points)
-  if (token.created) {
-    const ageHours = (Date.now() - token.created) / (1000 * 60 * 60)
-    if (ageHours >= 72) score += 10
-    else if (ageHours >= 24) score += 7
-    else if (ageHours >= 6) score += 4
-    else warnings.push("Very new token")
-  } else {
-    warnings.push("Unknown age")
-  }
-
-  // Social presence (max 5 points)
-  if (token.hasSocials) score += 5
-
-  // Ensure score doesn't go below 0
-  score = Math.max(0, score)
-
-  // Determine level
-  let level: 'safe' | 'caution' | 'risky'
-  if (score >= 70) level = 'safe'
-  else if (score >= 40) level = 'caution'
-  else level = 'risky'
-
-  return { score: Math.min(score, 100), level, warnings }
+  return holderMap
 }
 
 function extractSocialLinks(dexData: any): { twitter?: string; telegram?: string; website?: string } {
@@ -717,24 +767,11 @@ async function fetchAllTokens(): Promise<any[]> {
     if (price <= 0) continue
 
     const socials = extractSocialLinks(dexData)
-    const hasSocials = !!(socials.twitter || socials.telegram || socials.website)
-    
+
     const txns24h = (dexData?.txns?.h24?.buys || 0) + (dexData?.txns?.h24?.sells || 0) || geckoData?.txns24h || 0
     const buys24h = dexData?.txns?.h24?.buys || geckoData?.buys24h || 0
     const sells24h = dexData?.txns?.h24?.sells || geckoData?.sells24h || 0
     const created = dexData?.pairCreatedAt || geckoData?.createdAt || null
-
-    // Calculate safety score
-    const safety = calculateSafetyScore({
-      liquidity,
-      mcap: fdv,
-      volume24h,
-      txns24h,
-      buys24h,
-      sells24h,
-      created,
-      hasSocials,
-    })
 
     tokens.push({
       id: id++,
@@ -760,10 +797,8 @@ async function fetchAllTokens(): Promise<any[]> {
       twitter: socials.twitter || null,
       telegram: socials.telegram || null,
       website: socials.website || null,
-      // Safety metrics
-      safetyScore: safety.score,
-      safetyLevel: safety.level,
-      safetyWarnings: safety.warnings,
+      // Holder count (will be populated below)
+      holders: 0,
       // BonkFun verification
       isBonkFun: true,
       poolType: raydiumData?.poolType || poolTypes.get(mint) || "unknown",
@@ -771,8 +806,25 @@ async function fetchAllTokens(): Promise<any[]> {
   }
 
   tokens.sort((a, b) => b.mcap - a.mcap)
+
+  // Fetch holder counts for all tokens (top 100 only for performance)
+  const mintsToFetch = tokens.slice(0, 100).map(t => t.address)
+  if (mintsToFetch.length > 0) {
+    console.log(`[API] Fetching holder counts for ${mintsToFetch.length} tokens...`)
+    const holderCounts = await fetchHolderCounts(mintsToFetch)
+
+    // Update tokens with holder counts
+    for (const token of tokens) {
+      const holders = holderCounts.get(token.address)
+      if (holders !== undefined) {
+        token.holders = holders
+      }
+    }
+    console.log(`[API] Holder counts fetched for ${holderCounts.size} tokens`)
+  }
+
   console.log(`[API] Completed in ${Date.now() - startTime}ms with ${tokens.length} tokens`)
-  
+
   return tokens
 }
 

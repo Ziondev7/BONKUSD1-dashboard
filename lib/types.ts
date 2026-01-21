@@ -22,10 +22,8 @@ export interface Token {
   twitter: string | null
   telegram: string | null
   website: string | null
-  // Safety metrics
-  safetyScore: number
-  safetyLevel: 'safe' | 'caution' | 'risky'
-  safetyWarnings: string[]
+  // Holder count
+  holders: number
   // Real-time tracking
   prevPrice?: number
   priceDirection?: 'up' | 'down' | 'neutral'
