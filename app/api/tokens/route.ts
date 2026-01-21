@@ -554,20 +554,38 @@ async function fetchAllTokens(): Promise<any[]> {
     `GeckoTerminal=${geckoTerminalPools.size}, BonkFun Whitelist=${bonkFunWhitelist.size}`
   )
 
-  // CRITICAL: Use Dune whitelist as the authoritative source of truth
-  // Only include tokens that are verified BonkFun tokens
-  if (bonkFunWhitelist.size === 0) {
-    console.warn("[API] BonkFun whitelist unavailable - returning empty results (strict mode)")
-    console.warn("[API] Ensure DUNE_API_KEY is configured for production use")
-    return []
+  // Determine verification mode based on whitelist availability
+  const useWhitelist = bonkFunWhitelist.size > 0
+
+  if (!useWhitelist) {
+    console.warn("[API] BonkFun whitelist unavailable - using pool-type fallback filtering")
+    console.warn("[API] Configure DUNE_API_KEY for authoritative BonkFun verification")
   }
 
-  // Filter Raydium pools to only verified BonkFun tokens
+  // Filter Raydium pools based on verification mode
   const verifiedRaydiumPools = new Map<string, any>()
-  for (const [mint, data] of raydiumPools) {
-    if (bonkFunWhitelist.has(mint)) {
-      verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true })
+
+  if (useWhitelist) {
+    // PREFERRED: Use Dune whitelist as authoritative source
+    for (const [mint, data] of raydiumPools) {
+      if (bonkFunWhitelist.has(mint)) {
+        verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true, verifiedBy: "dune-whitelist" })
+      }
     }
+    console.log(`[API] Whitelist verification: ${verifiedRaydiumPools.size}/${raydiumPools.size} tokens verified`)
+  } else {
+    // FALLBACK: Use pool-type heuristic (less accurate but works without Dune)
+    // BonkFun tokens typically use CPMM pools after graduation
+    for (const [mint, data] of raydiumPools) {
+      const poolType = (data.poolType || "").toLowerCase()
+      const isLikelyBonkFun = poolType.includes("cpmm") ||
+                              poolType.includes("launchlab") ||
+                              poolType === "standard"
+      if (isLikelyBonkFun) {
+        verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true, verifiedBy: "pool-type-heuristic" })
+      }
+    }
+    console.log(`[API] Pool-type fallback: ${verifiedRaydiumPools.size}/${raydiumPools.size} tokens matched (may include non-BonkFun)`)
   }
 
   // The verified BonkFun mints from Raydium pools
