@@ -306,10 +306,20 @@ export async function saveDailyVolume(data: DailyVolumeData): Promise<boolean> {
 
   if (kv) {
     try {
-      await kv.zadd(DAILY_VOLUME_KEY, {
-        score: data.timestamp,
-        member: JSON.stringify(data),
-      })
+      const key = `${DAILY_VOLUME_KEY}:${data.date}`
+      await kv.set(key, JSON.stringify(data))
+
+      // Update the dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      const dates: string[] = datesJson
+        ? (typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[])
+        : []
+
+      if (!dates.includes(data.date)) {
+        dates.push(data.date)
+        dates.sort()
+        await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
+      }
       return true
     } catch (error) {
       console.error("[VolumeStore] KV error saving daily volume:", error)
@@ -329,6 +339,7 @@ export async function saveDailyVolume(data: DailyVolumeData): Promise<boolean> {
 
 /**
  * Bulk save daily volume data (for seeding from Dune)
+ * Uses simple key-value storage with date as key for reliability
  */
 export async function bulkSaveDailyVolume(dataArray: DailyVolumeData[]): Promise<{
   success: boolean
@@ -340,17 +351,24 @@ export async function bulkSaveDailyVolume(dataArray: DailyVolumeData[]): Promise
   let errors = 0
 
   if (kv) {
-    // Use pipeline for bulk operations
+    // Save each record with date as key
     for (const data of dataArray) {
       try {
-        await kv.zadd(DAILY_VOLUME_KEY, {
-          score: data.timestamp,
-          member: JSON.stringify(data),
-        })
+        const key = `${DAILY_VOLUME_KEY}:${data.date}`
+        await kv.set(key, JSON.stringify(data))
         saved++
       } catch (error) {
         console.error(`[VolumeStore] Error saving ${data.date}:`, error)
         errors++
+      }
+    }
+    // Store the list of dates for iteration
+    if (saved > 0) {
+      try {
+        const dates = dataArray.map(d => d.date).sort()
+        await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
+      } catch (e) {
+        console.error("[VolumeStore] Error saving dates index:", e)
       }
     }
     return { success: errors === 0, saved, errors }
@@ -387,19 +405,25 @@ export async function getDailyVolume(
 
   if (kv) {
     try {
-      const results = await kv.zrange(
-        DAILY_VOLUME_KEY,
-        fromTimestamp,
-        toTimestamp,
-        { byScore: true }
-      )
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) return []
 
-      if (results && Array.isArray(results)) {
-        return results.map(r =>
-          (typeof r === "string" ? JSON.parse(r) : r) as DailyVolumeData
-        )
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+      // Filter dates in range and fetch data
+      const results: DailyVolumeData[] = []
+      for (const date of dates) {
+        const dateTimestamp = new Date(date + "T00:00:00Z").getTime()
+        if (dateTimestamp >= fromTimestamp && dateTimestamp <= toTimestamp) {
+          const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${date}`)
+          if (dataJson) {
+            const data = typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson
+            results.push(data as DailyVolumeData)
+          }
+        }
       }
-      return []
+      return results.sort((a, b) => a.timestamp - b.timestamp)
     } catch (error) {
       console.error("[VolumeStore] KV error fetching daily volume:", error)
     }
@@ -419,14 +443,22 @@ export async function getAllDailyVolume(): Promise<DailyVolumeData[]> {
 
   if (kv) {
     try {
-      const results = await kv.zrange(DAILY_VOLUME_KEY, 0, -1)
+      // Get the dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) return []
 
-      if (results && Array.isArray(results)) {
-        return results.map(r =>
-          (typeof r === "string" ? JSON.parse(r) : r) as DailyVolumeData
-        )
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+      // Fetch all records
+      const results: DailyVolumeData[] = []
+      for (const date of dates) {
+        const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${date}`)
+        if (dataJson) {
+          const data = typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson
+          results.push(data as DailyVolumeData)
+        }
       }
-      return []
+      return results.sort((a, b) => a.timestamp - b.timestamp)
     } catch (error) {
       console.error("[VolumeStore] KV error fetching all daily volume:", error)
     }
@@ -443,9 +475,18 @@ export async function getLatestDailyVolume(): Promise<DailyVolumeData | null> {
 
   if (kv) {
     try {
-      const results = await kv.zrange(DAILY_VOLUME_KEY, -1, -1)
-      if (results && results.length > 0) {
-        return (typeof results[0] === "string" ? JSON.parse(results[0]) : results[0]) as DailyVolumeData
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) return null
+
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+      if (dates.length === 0) return null
+
+      // Get the last date's data
+      const latestDate = dates[dates.length - 1]
+      const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${latestDate}`)
+      if (dataJson) {
+        return (typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson) as DailyVolumeData
       }
       return null
     } catch (error) {
@@ -477,22 +518,24 @@ export async function getDailyVolumeStats(): Promise<{
 
   if (kv) {
     try {
-      const count = await kv.zcard(DAILY_VOLUME_KEY)
-      const oldest = await kv.zrange(DAILY_VOLUME_KEY, 0, 0)
-      const newest = await kv.zrange(DAILY_VOLUME_KEY, -1, -1)
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) {
+        return {
+          type: "vercel-kv",
+          count: 0,
+          oldestDate: null,
+          newestDate: null,
+        }
+      }
 
-      const oldestParsed = oldest?.[0]
-        ? (typeof oldest[0] === "string" ? JSON.parse(oldest[0]) : oldest[0]) as DailyVolumeData
-        : null
-      const newestParsed = newest?.[0]
-        ? (typeof newest[0] === "string" ? JSON.parse(newest[0]) : newest[0]) as DailyVolumeData
-        : null
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
 
       return {
         type: "vercel-kv",
-        count,
-        oldestDate: oldestParsed?.date || null,
-        newestDate: newestParsed?.date || null,
+        count: dates.length,
+        oldestDate: dates[0] || null,
+        newestDate: dates[dates.length - 1] || null,
       }
     } catch {
       // Fall through to memory
