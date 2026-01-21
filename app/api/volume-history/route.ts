@@ -191,6 +191,12 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
 
     console.log(`[Dune] Raw data: ${rows.length} rows`)
 
+    // Log sample row for debugging
+    if (rows.length > 0) {
+      console.log(`[Dune] Sample row keys: ${Object.keys(rows[0]).join(', ')}`)
+      console.log(`[Dune] Sample row: ${JSON.stringify(rows[0])}`)
+    }
+
     // Check if data has token_mint or pool_address field (per-token/pool query)
     const hasTokenData = rows.length > 0 && (rows[0].token_mint || rows[0].pool_address)
 
@@ -202,6 +208,8 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
 
       const dateAggregates = new Map<string, { volume: number; trades: number }>()
       let matchedRows = 0
+      const unmatchedTokens = new Set<string>()
+      const matchedTokens = new Set<string>()
 
       rows.forEach((row) => {
         // Try token_mint first, then fall back to pool_address
@@ -210,10 +218,13 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
         // Only include tokens that are in our BONK.fun token list
         if (bonkfunPools.has(identifier)) {
           matchedRows++
+          matchedTokens.add(identifier)
           const existing = dateAggregates.get(row.date) || { volume: 0, trades: 0 }
           existing.volume += Number(row.daily_volume_usd) || 0
           existing.trades += Number(row.trade_count) || 0
           dateAggregates.set(row.date, existing)
+        } else {
+          unmatchedTokens.add(identifier)
         }
       })
 
@@ -223,7 +234,14 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
         daily_volume_usd: agg.volume,
       }))
 
-      console.log(`[Dune] Matched ${matchedRows} rows -> ${data.length} days of BONK.fun volume`)
+      console.log(`[Dune] Matched ${matchedRows} rows from ${matchedTokens.size} unique tokens -> ${data.length} days`)
+      console.log(`[Dune] Unmatched: ${unmatchedTokens.size} unique tokens`)
+      if (matchedTokens.size > 0) {
+        console.log(`[Dune] Sample matched: ${Array.from(matchedTokens).slice(0, 3).join(', ')}`)
+      }
+      if (unmatchedTokens.size > 0 && matchedTokens.size === 0) {
+        console.log(`[Dune] Sample unmatched: ${Array.from(unmatchedTokens).slice(0, 5).join(', ')}`)
+      }
     } else {
       // No token filtering available - use data as-is (aggregated format)
       // This fallback handles the old query format
@@ -657,6 +675,9 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
     // Get BONK.fun token mint addresses to filter Dune data
     const bonkfunTokenMints = new Set(pools.map(p => p.tokenMint.toLowerCase()))
     console.log(`[Volume] Will filter Dune data by ${bonkfunTokenMints.size} BONK.fun token mints`)
+    // Log first few token mints for debugging
+    const mintSample = Array.from(bonkfunTokenMints).slice(0, 5)
+    console.log(`[Volume] Sample token mints: ${mintSample.join(', ')}`)
 
     const duneData = await fetchDuneHistoricalVolume(bonkfunTokenMints)
 
