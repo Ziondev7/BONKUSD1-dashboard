@@ -70,6 +70,27 @@ function shouldExclude(symbol?: string, name?: string): boolean {
   )
 }
 
+/**
+ * Check if a token is a BONK.fun launched token
+ * BONK.fun tokens have mint addresses ending with 'bonk'
+ */
+function isBonkfunToken(mintAddress?: string): boolean {
+  if (!mintAddress) return false
+  return mintAddress.toLowerCase().endsWith('bonk')
+}
+
+/**
+ * Check if a token should be excluded by its mint address
+ * Excludes tokens ending with 'USA' or other non-BONK.fun patterns
+ */
+function shouldExcludeByMint(mintAddress?: string): boolean {
+  if (!mintAddress) return true
+  const mint = mintAddress.toLowerCase()
+  // Exclude tokens ending with 'usa' (not BONK.fun tokens)
+  if (mint.endsWith('usa')) return true
+  return false
+}
+
 function hasSuspiciousMetrics(fdv: number, liquidity: number): boolean {
   if (liquidity < CONFIG.MIN_LIQUIDITY_USD) return true
   if (fdv > 0 && liquidity > 0 && fdv / liquidity > CONFIG.MAX_MCAP_LIQUIDITY_RATIO) return true
@@ -539,6 +560,10 @@ async function fetchAllTokens(): Promise<any[]> {
 
     if (shouldExclude(symbol, name)) continue
     if (!dexData && !raydiumData && !geckoData) continue
+
+    // Only include BONK.fun tokens (mint addresses ending with 'bonk')
+    // This excludes tokens like those ending with 'USA', regular SPL tokens, etc.
+    if (!isBonkfunToken(mint)) continue
 
     const price = dexData?.priceUsd ? Number.parseFloat(dexData.priceUsd) : geckoData?.price || raydiumData?.price || 0
     const liquidity = dexData?.liquidity?.usd
