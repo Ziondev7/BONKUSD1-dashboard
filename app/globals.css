@@ -1035,14 +1035,16 @@ body.pro-mode-active {
 
 /* Pro mode panel - terminal style card */
 .pro-panel {
-  background: rgba(8, 8, 10, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 6px;
+  background: rgba(10, 10, 12, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .pro-panel:hover {
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 /* Pro mode nested chart - removes outer wrapper styling */
@@ -1086,8 +1088,26 @@ body.pro-mode-active {
 }
 
 /* Pro mode chart inside panel - fills container */
-.pro-panel .h-\\[140px\\] {
+.pro-panel .h-\[140px\] {
   height: 100% !important;
+}
+
+/* Pro mode chart min-heights - allow flex to work */
+.pro-panel .min-h-\[120px\] {
+  min-height: 0 !important;
+}
+
+/* Pro mode header styling */
+.pro-panel-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Pro mode content area fills remaining space */
+.pro-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Pro mode scanline effect (optional, uncomment to enable) */

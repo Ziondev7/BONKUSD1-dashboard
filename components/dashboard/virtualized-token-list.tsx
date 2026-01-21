@@ -106,7 +106,7 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
         key={token.address}
         onClick={() => onSelectToken(token)}
         className={cn(
-          "flex items-center gap-1.5 px-2 h-[52px] border-b border-white/[0.03] cursor-pointer transition-all",
+          "flex items-center gap-1 px-2 h-[44px] border-b border-white/[0.03] cursor-pointer transition-all",
           "hover:bg-bonk/[0.03]",
           isHot && "bg-danger/[0.02]"
         )}
@@ -126,13 +126,13 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
         </span>
 
         {/* Token Logo */}
-        <div className="w-6 h-6 rounded bg-white/[0.04] border border-white/[0.06] overflow-hidden flex-shrink-0 flex items-center justify-center text-xs">
+        <div className="w-5 h-5 rounded bg-white/[0.04] border border-white/[0.06] overflow-hidden flex-shrink-0 flex items-center justify-center text-[8px]">
           {token.imageUrl ? (
             <Image
               src={token.imageUrl}
               alt={token.name}
-              width={24}
-              height={24}
+              width={20}
+              height={20}
               className="object-cover"
               unoptimized
             />
@@ -142,59 +142,52 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
         </div>
 
         {/* Token Name & Symbol */}
-        <div className="flex-1 min-w-0 max-w-[90px]">
-          <div className="flex items-center gap-1">
-            <p className="text-[10px] font-bold text-white truncate">{token.name}</p>
+        <div className="flex-1 min-w-0 max-w-[80px]">
+          <div className="flex items-center gap-0.5">
+            <p className="text-[9px] font-bold text-white truncate leading-tight">{token.name}</p>
             {isNew && (
-              <span className="px-1 py-0.5 bg-success/20 text-success text-[7px] font-bold rounded">N</span>
+              <span className="px-0.5 bg-success/20 text-success text-[6px] font-bold rounded">N</span>
             )}
             {isHot && (
-              <Flame className="w-2.5 h-2.5 text-danger flex-shrink-0" />
+              <Flame className="w-2 h-2 text-danger flex-shrink-0" />
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <p className="text-[9px] text-white/40 font-mono">${token.symbol}</p>
+          <div className="flex items-center gap-0.5">
+            <p className="text-[8px] text-white/40 font-mono">${token.symbol}</p>
             <button
               onClick={(e) => handleCopyAddress(token.address, e)}
               className="text-white/20 hover:text-bonk transition-colors"
             >
               {copiedAddress === token.address ? (
-                <Check className="w-2.5 h-2.5 text-success" />
+                <Check className="w-2 h-2 text-success" />
               ) : (
-                <Copy className="w-2.5 h-2.5" />
+                <Copy className="w-2 h-2" />
               )}
             </button>
           </div>
         </div>
 
         {/* Market Cap */}
-        <div className="w-14 flex-shrink-0 text-right">
-          <p className="text-[10px] font-mono text-white tabular-nums">
+        <div className="w-[52px] flex-shrink-0 text-right">
+          <p className="text-[9px] font-mono text-white tabular-nums">
             {formatNumber(token.mcap)}
           </p>
         </div>
 
         {/* Volume */}
-        <div className="w-12 flex-shrink-0 text-right hidden xl:block">
-          <p className="text-[9px] font-mono text-white/60 tabular-nums">
+        <div className="w-[44px] flex-shrink-0 text-right">
+          <p className="text-[8px] font-mono text-white/50 tabular-nums">
             {formatNumber(token.volume24h)}
           </p>
         </div>
 
-        {/* Liquidity */}
-        <div className="w-12 flex-shrink-0 text-right hidden xl:block">
-          <p className="text-[9px] font-mono text-white/60 tabular-nums">
-            {formatNumber(token.liquidity)}
-          </p>
-        </div>
-
         {/* 24h Change */}
-        <div className="w-14 flex-shrink-0 text-right">
+        <div className="w-[52px] flex-shrink-0 text-right">
           <span className={cn(
-            "inline-flex items-center gap-0.5 text-[10px] font-mono font-bold tabular-nums",
+            "inline-flex items-center gap-0.5 text-[9px] font-mono font-bold tabular-nums",
             isPositive ? "text-success" : "text-danger"
           )}>
-            {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+            {isPositive ? <TrendingUp className="w-2 h-2" /> : <TrendingDown className="w-2 h-2" />}
             {isPositive ? "+" : ""}{token.change24h.toFixed(1)}%
           </span>
         </div>
@@ -205,10 +198,10 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
             e.stopPropagation()
             onOpenTradeModal(token)
           }}
-          className="flex-shrink-0 p-1.5 bg-bonk/80 hover:bg-bonk text-black rounded transition-all"
+          className="flex-shrink-0 p-1 bg-bonk/80 hover:bg-bonk text-black rounded transition-all"
           title={`Trade ${token.symbol}`}
         >
-          <Image src="/trojan-horse.png" alt="Trade" width={12} height={12} unoptimized />
+          <Image src="/trojan-horse.png" alt="Trade" width={10} height={10} unoptimized />
         </button>
       </div>
     )
@@ -217,17 +210,17 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
   return (
     <div ref={containerRef} className="h-full flex flex-col">
       {/* Column Headers */}
-      <div className="flex-shrink-0 flex items-center gap-1.5 px-2 py-2 border-b border-white/[0.06] bg-[rgba(5,5,5,0.98)]">
+      <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-white/[0.04]">
         <div className="w-3" /> {/* Star placeholder */}
-        <ColumnHeader label="#" width="20px" />
-        <div className="w-6" /> {/* Logo placeholder */}
-        <ColumnHeader label="Token" width="90px" className="flex-1" />
+        <ColumnHeader label="#" width="18px" />
+        <div className="w-5" /> {/* Logo placeholder */}
+        <ColumnHeader label="Token" width="80px" className="flex-1" />
         <ColumnHeader
           label="MCap"
           sortKey="mcap"
           currentSort={sortBy}
           onSort={onSortChange}
-          width="56px"
+          width="52px"
           align="right"
         />
         <ColumnHeader
@@ -235,40 +228,30 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
           sortKey="volume"
           currentSort={sortBy}
           onSort={onSortChange}
-          width="48px"
+          width="44px"
           align="right"
-          className="hidden xl:block"
-        />
-        <ColumnHeader
-          label="Liq"
-          sortKey="liquidity"
-          currentSort={sortBy}
-          onSort={onSortChange}
-          width="48px"
-          align="right"
-          className="hidden xl:block"
         />
         <ColumnHeader
           label="24h"
           sortKey="change"
           currentSort={sortBy}
           onSort={onSortChange}
-          width="56px"
+          width="52px"
           align="right"
         />
-        <div className="w-8" /> {/* Trade button placeholder */}
+        <div className="w-7" /> {/* Trade button placeholder */}
       </div>
 
       {/* Token List - Scrollable */}
       <div className="flex-1 min-h-0 overflow-y-auto pro-scroll">
         {isLoading ? (
-          <div className="space-y-1 p-2">
-            {[...Array(15)].map((_, i) => (
-              <div key={i} className="h-[52px] skeleton rounded" />
+          <div className="space-y-0.5 p-1">
+            {[...Array(20)].map((_, i) => (
+              <div key={i} className="h-[44px] skeleton rounded" />
             ))}
           </div>
         ) : tokens.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-white/30 font-mono text-xs">
+          <div className="h-full flex items-center justify-center text-white/20 font-mono text-[10px]">
             No tokens found
           </div>
         ) : (
@@ -279,10 +262,10 @@ export const VirtualizedTokenList = memo(function VirtualizedTokenList({
       </div>
 
       {/* Footer Stats */}
-      <div className="flex-shrink-0 px-2 py-1.5 border-t border-white/[0.04] bg-[rgba(5,5,5,0.95)]">
-        <div className="flex items-center justify-between text-[9px] font-mono text-white/40">
+      <div className="flex-shrink-0 px-2 py-1 border-t border-white/[0.04]">
+        <div className="flex items-center justify-between text-[8px] font-mono text-white/30">
           <span>{tokens.length} tokens</span>
-          <span>Scroll to explore</span>
+          <span>Market Watch</span>
         </div>
       </div>
     </div>

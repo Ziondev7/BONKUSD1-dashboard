@@ -319,12 +319,24 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
   // Compact mode for Pro Mode
   if (compact) {
     return (
-      <div className="glass-card-solid p-3 pro-bento-item h-full flex flex-col">
+      <div className="h-full flex flex-col">
         {/* Compact Header */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-white/[0.04] flex-shrink-0">
+          <div className="flex items-center gap-1.5">
             <Activity className="w-3 h-3 text-bonk" />
-            <span className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-wide">Volume</span>
+            <span className="text-[9px] font-mono font-bold text-white/50 uppercase tracking-wider">Volume</span>
+            <span className="text-sm font-mono font-black text-white ml-1">
+              ${displayVolume > 0 ? formatCompactNumber(displayVolume) : "—"}
+            </span>
+            {data && (
+              <span className={cn(
+                "flex items-center gap-0.5 text-[9px] font-mono font-bold",
+                isPositive ? "text-success" : "text-danger"
+              )}>
+                {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                {isPositive ? "+" : ""}{data.stats.change.toFixed(1)}%
+              </span>
+            )}
           </div>
           {/* Compact Period Selector */}
           <div className="flex items-center gap-0.5 bg-white/[0.03] border border-white/[0.06] rounded p-0.5">
@@ -333,7 +345,7 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
                 key={p.id}
                 onClick={() => setPeriod(p.id)}
                 className={cn(
-                  "px-2 py-0.5 rounded text-[9px] font-mono font-bold transition-all",
+                  "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all",
                   period === p.id
                     ? "bg-bonk text-black"
                     : "text-white/40 hover:text-white"
@@ -345,24 +357,8 @@ export function VolumeEvolution({ currentVolume, compact = false }: VolumeEvolut
           </div>
         </div>
 
-        {/* Volume Value */}
-        <div className="flex items-baseline gap-2 mb-2">
-          <span className="text-xl font-mono font-black text-white">
-            ${displayVolume > 0 ? formatCompactNumber(displayVolume) : "—"}
-          </span>
-          {data && (
-            <span className={cn(
-              "flex items-center gap-0.5 text-[10px] font-mono font-bold",
-              isPositive ? "text-success" : "text-danger"
-            )}>
-              {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-              {isPositive ? "+" : ""}{data.stats.change.toFixed(1)}%
-            </span>
-          )}
-        </div>
-
         {/* Compact Chart */}
-        <div className="flex-1 min-h-[120px]">
+        <div className="flex-1 min-h-0 p-2">
           {isLoading ? (
             <div className="h-full flex items-center justify-center">
               <div className="w-4 h-4 border-2 border-bonk border-t-transparent rounded-full animate-spin" />
