@@ -180,8 +180,19 @@ async function executeDuneSQL(sql: string): Promise<any[]> {
   throw new Error("Dune SQL query timeout")
 }
 
+// BONK.fun program address - tokens created through this program are BONK.fun tokens
+// Not all BONK.fun tokens end with "bonk" - vanity addresses are optional
+const BONKFUN_PROGRAM_ID = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj"
+
 /**
  * Build SQL query for USD1 volume history
+ *
+ * WHY THIS CAPTURES ALL BONK.FUN TOKENS:
+ * - USD1 is specifically created as the quote currency for BONK.fun launchpad
+ * - All tokens paired with USD1 on Raydium are BONK.fun-launched tokens
+ * - BONK.fun tokens can have ANY address (not just ending in "bonk")
+ *   because vanity addresses are optional on the launchpad
+ * - The BONK.fun program ID is: LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj
  */
 function buildVolumeHistorySQL(period: string): string {
   let interval: string
@@ -201,7 +212,7 @@ function buildVolumeHistorySQL(period: string): string {
       lookback = "30 days"
       break
     case "all":
-      interval = "day"
+      interval = "week"
       lookback = "180 days"
       break
     default:
@@ -210,11 +221,18 @@ function buildVolumeHistorySQL(period: string): string {
   }
 
   // Query for Raydium DEX trades involving USD1
+  // This captures ALL BONK.fun tokens because USD1 is the quote currency for BONK.fun
   return `
     SELECT
       date_trunc('${interval}', block_time) as time_bucket,
       SUM(amount_usd) as volume,
-      COUNT(*) as trades
+      COUNT(*) as trades,
+      COUNT(DISTINCT
+        CASE
+          WHEN token_bought_mint_address = '${USD1_MINT}' THEN token_sold_mint_address
+          ELSE token_bought_mint_address
+        END
+      ) as unique_tokens
     FROM dex_solana.trades
     WHERE
       block_time >= NOW() - INTERVAL '${lookback}'
@@ -223,6 +241,7 @@ function buildVolumeHistorySQL(period: string): string {
         OR token_sold_mint_address = '${USD1_MINT}'
       )
       AND project = 'raydium'
+      AND amount_usd > 0
     GROUP BY 1
     ORDER BY 1 ASC
   `

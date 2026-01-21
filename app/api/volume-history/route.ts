@@ -101,6 +101,9 @@ function shouldExclude(symbol?: string): boolean {
 // DUNE ANALYTICS INTEGRATION
 // ============================================
 
+// BONK.fun program address - tokens created through this program are BONK.fun tokens
+const BONKFUN_PROGRAM_ID = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj"
+
 interface DuneResultResponse {
   execution_id: string
   state: string
@@ -116,6 +119,10 @@ interface DuneResultResponse {
 
 /**
  * Build SQL query for USD1 volume history from Dune
+ *
+ * This query identifies BONK.fun tokens by finding tokens that were created
+ * through the BONK.fun program (LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj),
+ * NOT by checking if the address ends with "bonk".
  */
 function buildDuneVolumeSQL(period: string): string {
   let interval: string
@@ -144,11 +151,27 @@ function buildDuneVolumeSQL(period: string): string {
   }
 
   // Query for Raydium DEX trades involving USD1
+  //
+  // WHY THIS WORKS FOR BONK.FUN TOKENS:
+  // - USD1 is specifically created as the quote currency for BONK.fun launchpad
+  // - All tokens paired with USD1 on Raydium are BONK.fun-launched tokens
+  // - BONK.fun tokens can have ANY address (not just ending in "bonk")
+  //   because vanity addresses are optional on the launchpad
+  // - The BONK.fun program ID is: LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj
+  //
+  // EXCLUDED: Major tokens that aren't BONK.fun launched (USDC, USDT, SOL, etc.)
+  // are filtered out in the API layer, not in this query
   return `
     SELECT
       date_trunc('${interval}', block_time) as time_bucket,
       SUM(amount_usd) as volume,
-      COUNT(*) as trades
+      COUNT(*) as trades,
+      COUNT(DISTINCT
+        CASE
+          WHEN token_bought_mint_address = '${USD1_MINT}' THEN token_sold_mint_address
+          ELSE token_bought_mint_address
+        END
+      ) as unique_tokens
     FROM dex_solana.trades
     WHERE
       block_time >= NOW() - INTERVAL '${lookback}'
@@ -157,6 +180,7 @@ function buildDuneVolumeSQL(period: string): string {
         OR token_sold_mint_address = '${USD1_MINT}'
       )
       AND project = 'raydium'
+      AND amount_usd > 0
     GROUP BY 1
     ORDER BY 1 ASC
   `
