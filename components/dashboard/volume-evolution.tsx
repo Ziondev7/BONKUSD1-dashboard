@@ -83,32 +83,49 @@ function VolumeChart({
 
   // Get full date string for tooltip
   const getFullDateLabel = (timestamp: number): string => {
+    // Handle invalid timestamps (epoch 0 = January 1970)
+    if (!timestamp || timestamp < 1000000000000) {
+      // If timestamp is in seconds instead of milliseconds, convert it
+      if (timestamp > 1000000000 && timestamp < 2000000000) {
+        timestamp = timestamp * 1000
+      } else if (timestamp < 1000000000000) {
+        return "Unknown Date"
+      }
+    }
+
     const date = new Date(timestamp)
+
+    // Validate the date is reasonable (after 2020)
+    if (date.getFullYear() < 2020) {
+      return "Unknown Date"
+    }
+
     if (period === "24h") {
-      return date.toLocaleString([], { 
+      return date.toLocaleString([], {
         weekday: 'short',
-        hour: '2-digit', 
+        hour: '2-digit',
         minute: '2-digit'
       })
     } else if (period === "7d") {
-      return date.toLocaleDateString([], { 
+      return date.toLocaleDateString([], {
         weekday: 'long',
         month: 'short',
         day: 'numeric'
       })
     } else if (period === "1m") {
-      return date.toLocaleDateString([], { 
+      return date.toLocaleDateString([], {
         weekday: 'long',
-        month: 'long', 
+        month: 'long',
         day: 'numeric',
         year: 'numeric'
       })
     } else {
-      // All time - show month/year for monthly candles
-      return date.toLocaleDateString([], { 
-        month: 'long', 
+      // All time - show week of date for weekly candles
+      return `Week of ${date.toLocaleDateString([], {
+        month: 'short',
+        day: 'numeric',
         year: 'numeric'
-      })
+      })}`
     }
   }
 
@@ -117,9 +134,18 @@ function VolumeChart({
     if (data.length < 2) return []
     const labels: { index: number; label: string }[] = []
     const step = Math.max(1, Math.floor(data.length / 6))
-    
+
     for (let i = 0; i < data.length; i += step) {
-      const date = new Date(data[i].timestamp)
+      let timestamp = data[i].timestamp
+      // Handle invalid or seconds-based timestamps
+      if (timestamp > 1000000000 && timestamp < 2000000000) {
+        timestamp = timestamp * 1000
+      }
+      const date = new Date(timestamp)
+
+      // Skip invalid dates
+      if (date.getFullYear() < 2020) continue
+
       let label: string
       if (period === "24h") {
         label = date.getHours().toString().padStart(2, '0') + ':00'
@@ -128,8 +154,8 @@ function VolumeChart({
       } else if (period === "1m") {
         label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
       } else {
-        // All time - show month abbreviation for monthly candles
-        label = date.toLocaleDateString([], { month: 'short' })
+        // All time - show month and day for weekly candles
+        label = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
       }
       labels.push({ index: i, label })
     }
