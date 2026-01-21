@@ -600,6 +600,60 @@ function getStoredSnapshots(period: string): VolumeSnapshot[] {
 // ============================================
 
 /**
+ * Aggregate daily data into weekly data points
+ * Used for ALL period to show weekly candles
+ */
+function aggregateToWeekly(dailyData: VolumeDataPoint[]): VolumeDataPoint[] {
+  if (dailyData.length === 0) return []
+
+  const weeklyMap = new Map<number, { volume: number; trades: number; poolCount: number; count: number }>()
+
+  for (const day of dailyData) {
+    // Get the start of the week (Monday) for this day
+    const date = new Date(day.timestamp)
+    const dayOfWeek = date.getUTCDay()
+    // Adjust to get Monday as start of week (0 = Sunday, so we shift)
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    const weekStart = new Date(date)
+    weekStart.setUTCDate(date.getUTCDate() - daysToMonday)
+    weekStart.setUTCHours(0, 0, 0, 0)
+    const weekTimestamp = weekStart.getTime()
+
+    const existing = weeklyMap.get(weekTimestamp)
+    if (existing) {
+      existing.volume += day.volume
+      existing.trades += day.trades
+      existing.poolCount = Math.max(existing.poolCount, day.poolCount || 0)
+      existing.count++
+    } else {
+      weeklyMap.set(weekTimestamp, {
+        volume: day.volume,
+        trades: day.trades,
+        poolCount: day.poolCount || 0,
+        count: 1,
+      })
+    }
+  }
+
+  // Convert map to array
+  const weeklyData: VolumeDataPoint[] = []
+  weeklyMap.forEach((data, timestamp) => {
+    weeklyData.push({
+      timestamp,
+      volume: data.volume,
+      trades: data.trades,
+      poolCount: data.poolCount,
+      isOhlcv: true,
+    })
+  })
+
+  // Sort by timestamp
+  weeklyData.sort((a, b) => a.timestamp - b.timestamp)
+
+  return weeklyData
+}
+
+/**
  * Fetch historical volume data from Vercel KV
  * This is the primary source for historical data (fast, ~5ms)
  */
@@ -647,7 +701,7 @@ async function fetchKVVolumeHistory(period: string): Promise<{
       .filter(d => d.timestamp >= cutoffTime && d.timestamp <= now)
       .sort((a, b) => a.timestamp - b.timestamp)
 
-    const data: VolumeDataPoint[] = filteredData.map(d => ({
+    let data: VolumeDataPoint[] = filteredData.map(d => ({
       timestamp: d.timestamp,
       volume: d.volume,
       trades: d.trades,
@@ -655,10 +709,16 @@ async function fetchKVVolumeHistory(period: string): Promise<{
       isOhlcv: true, // KV data is accurate historical data
     }))
 
+    // For ALL period, aggregate to weekly candles
+    if (period === "all" && data.length > 30) {
+      data = aggregateToWeekly(data)
+      console.log(`[Volume] KV returned ${filteredData.length} days, aggregated to ${data.length} weekly candles`)
+    } else {
+      console.log(`[Volume] KV returned ${data.length} days of historical data`)
+    }
+
     const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
     const uniqueTokens = Math.max(...filteredData.map(d => d.uniqueTokens), 0)
-
-    console.log(`[Volume] KV returned ${data.length} days of historical data`)
 
     return { data, totalVolume, uniqueTokens }
   } catch (error) {
