@@ -560,52 +560,63 @@ async function fetchHolderCountFromSolscan(mint: string): Promise<number> {
 }
 
 /**
- * Fetch holder count using Helius DAS API getTokenAccounts
- * This is more accurate than getProgramAccounts
+ * Fetch holder count using Solana RPC getProgramAccounts via Helius
+ * Returns ALL token accounts, filters to count only non-zero balances
  */
 async function fetchHolderCountFromHelius(mint: string): Promise<number> {
   const apiKey = process.env.HELIUS_API_KEY
   if (!apiKey) return 0
 
   try {
-    // Use Helius DAS API - getTokenAccounts with pagination to get total
+    // Use getProgramAccounts to get ALL token accounts for this mint
+    // Fetch amount field (offset 64, 8 bytes) to filter zero balances
     const response = await fetch(`https://mainnet.helius-rpc.com/?api-key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: mint,
-        method: "getTokenAccounts",
-        params: {
-          mint: mint,
-          limit: 1000,
-          options: {
-            showZeroBalance: false  // Only count non-zero balances
+        method: "getProgramAccounts",
+        params: [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          {
+            encoding: "base64",
+            dataSlice: { offset: 64, length: 8 }, // Get only the amount field (u64)
+            filters: [
+              { dataSize: 165 },
+              { memcmp: { offset: 0, bytes: mint } }
+            ]
           }
-        }
+        ]
       }),
     })
 
     if (response.ok) {
       const data = await response.json()
-
-      // Check if we got paginated results with total
-      if (data.result) {
-        // If total is provided, use it
-        if (data.result.total !== undefined) {
-          console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${data.result.total}`)
-          return data.result.total
+      if (data.result && Array.isArray(data.result)) {
+        // Count only accounts with non-zero balance
+        let nonZeroCount = 0
+        for (const account of data.result) {
+          try {
+            // Decode base64 amount (8 bytes little-endian u64)
+            const amountBase64 = account.account.data[0]
+            const amountBuffer = Buffer.from(amountBase64, 'base64')
+            // Check if any byte is non-zero (faster than full decode)
+            const hasBalance = amountBuffer.some((byte: number) => byte !== 0)
+            if (hasBalance) {
+              nonZeroCount++
+            }
+          } catch {
+            // If we can't decode, count it anyway
+            nonZeroCount++
+          }
         }
-        // Otherwise count the token_accounts array
-        if (data.result.token_accounts && Array.isArray(data.result.token_accounts)) {
-          const count = data.result.token_accounts.length
-          console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${count}`)
-          return count
-        }
+        console.log(`[Helius] ${mint.slice(0, 8)}... holders: ${nonZeroCount} (${data.result.length} total accounts)`)
+        return nonZeroCount
       }
-
-      // Log unexpected response for debugging
-      console.log(`[Helius] ${mint.slice(0, 8)}... unexpected response:`, JSON.stringify(data).slice(0, 200))
+      if (data.error) {
+        console.log(`[Helius] ${mint.slice(0, 8)}... error: ${data.error.message}`)
+      }
     }
   } catch (err) {
     console.log(`[Helius] Error for ${mint.slice(0, 8)}...:`, err)
