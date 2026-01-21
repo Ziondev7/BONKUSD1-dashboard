@@ -14,6 +14,7 @@ const FloatingNav = dynamic(() => import("./dashboard/floating-nav").then(mod =>
   ssr: false,
 })
 import { VolumeEvolution } from "./dashboard/volume-evolution"
+import { LaunchpadVolume } from "./dashboard/launchpad-volume"
 import { TopPerformers } from "./dashboard/top-performers"
 import { TokenFilters } from "./dashboard/token-filters"
 import { TokenTable } from "./dashboard/token-table"
@@ -272,6 +273,9 @@ export function BonkDashboard() {
 
           {/* Volume Evolution Chart */}
           <VolumeEvolution currentVolume={metrics.totalVolume} />
+
+          {/* Launchpad Volume Chart */}
+          <LaunchpadVolume />
 
           {/* Top Performers */}
           <TopPerformers
