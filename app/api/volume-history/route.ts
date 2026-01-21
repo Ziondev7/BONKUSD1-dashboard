@@ -41,6 +41,7 @@ interface CacheEntry {
   period: string
   synthetic: boolean
   totalVolume24h: number
+  totalVolumePeriod: number
   poolCount: number
   ohlcvCoverage: number // Percentage of volume covered by real OHLCV
   dataSource: "ohlcv" | "snapshots" | "synthetic"
@@ -364,15 +365,14 @@ function snapshotsToVolumeData(
 
 /**
  * Main function to fetch accurate volume history
- * Strategy:
- * 1. For 24h: Use OHLCV scaled to Raydium total (most accurate for short-term)
- * 2. For 7d/1m/all: Use stored snapshots (accurate historical data)
- * 3. Fallback to synthetic distribution if no data available
+ * Strategy: Always use OHLCV data to get actual per-period volumes
+ * This gives accurate totals (sum of all bars = total volume for period)
  */
 async function fetchBonkFunVolumeHistory(period: string): Promise<{
   data: VolumeDataPoint[]
   synthetic: boolean
   totalVolume24h: number
+  totalVolumePeriod: number
   poolCount: number
   ohlcvCoverage: number
   dataSource: "ohlcv" | "snapshots" | "synthetic"
@@ -384,7 +384,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
 
   if (pools.length === 0 || totalVolume24h === 0) {
     console.log("[Volume] No BONK.fun/USD1 pools found")
-    return { data: [], synthetic: true, totalVolume24h: 0, poolCount: 0, ohlcvCoverage: 0, dataSource: "synthetic" }
+    return { data: [], synthetic: true, totalVolume24h: 0, totalVolumePeriod: 0, poolCount: 0, ohlcvCoverage: 0, dataSource: "synthetic" }
   }
 
   // Save current snapshot for historical tracking
@@ -395,7 +395,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
     poolCount: pools.length,
   })
 
-  // Step 2: Determine data source based on period
+  // Step 2: Determine cutoff time based on period
   const now = Date.now()
   let cutoffTime: number
 
@@ -416,28 +416,7 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       cutoffTime = now - 24 * 60 * 60 * 1000
   }
 
-  // Step 3: Try to use stored snapshots for longer periods
-  if (period !== "24h") {
-    const snapshots = await getVolumeSnapshots(cutoffTime, now)
-
-    if (snapshots.length >= 3) { // Need at least 3 data points for a meaningful chart
-      console.log(`[Volume] Using ${snapshots.length} stored snapshots for ${period}`)
-      const volumeData = snapshotsToVolumeData(snapshots, period)
-
-      return {
-        data: volumeData,
-        synthetic: false,
-        totalVolume24h,
-        poolCount: pools.length,
-        ohlcvCoverage: 100, // Snapshots are authoritative
-        dataSource: "snapshots",
-      }
-    } else {
-      console.log(`[Volume] Only ${snapshots.length} snapshots available for ${period}, falling back to OHLCV`)
-    }
-  }
-
-  // Step 4: Use OHLCV for 24h or as fallback for other periods
+  // Step 3: Always use OHLCV for accurate per-period volumes
   let timeframe: string
   let aggregate: number
 
@@ -497,39 +476,43 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   // Sort by timestamp
   filteredOhlcv.sort((a, b) => a.timestamp - b.timestamp)
 
-  // Step 5: If we have OHLCV data, scale it to match actual total (for 24h only)
+  // Step 4: If we have OHLCV data, scale and return
   if (filteredOhlcv.length >= 2 && ohlcvTotalVolume > 0) {
     // For 24h period, scale to match Raydium's reported total
-    // For longer periods, OHLCV data represents actual historical volume
-    const scaleFactor = period === "24h" && totalVolume24h > 0
-      ? totalVolume24h / ohlcvTotalVolume
-      : 1
+    // For longer periods, scale proportionally based on coverage to estimate full ecosystem volume
+    const scaleFactor = ohlcvCoverage > 0 ? (100 / ohlcvCoverage) : 1
 
     const scaledData = filteredOhlcv.map(point => ({
       ...point,
       volume: Math.round(point.volume * scaleFactor),
     }))
 
-    console.log(`[Volume] Returning ${scaledData.length} OHLCV data points (scaled by ${scaleFactor.toFixed(2)}x)`)
+    // Calculate total volume for the period (sum of all bars after scaling)
+    const totalVolumePeriod = scaledData.reduce((sum, d) => sum + d.volume, 0)
+
+    console.log(`[Volume] Returning ${scaledData.length} OHLCV data points, total period volume: $${totalVolumePeriod.toLocaleString()}`)
     return {
       data: scaledData,
       synthetic: false,
       totalVolume24h,
+      totalVolumePeriod,
       poolCount: pools.length,
       ohlcvCoverage,
       dataSource: "ohlcv",
     }
   }
 
-  // Step 6: Fallback - create realistic distribution from total volume
+  // Step 5: Fallback - create realistic distribution from total volume
   console.log(`[Volume] OHLCV unavailable, creating synthetic distribution from Raydium volume`)
 
   const distributedData = createVolumeDistribution(totalVolume24h, period, pools.length)
+  const totalVolumePeriod = distributedData.reduce((sum, d) => sum + d.volume, 0)
 
   return {
     data: distributedData,
     synthetic: true,
     totalVolume24h,
+    totalVolumePeriod,
     poolCount: pools.length,
     ohlcvCoverage: 0,
     dataSource: "synthetic",
@@ -622,7 +605,7 @@ function createVolumeDistribution(totalVolume: number, period: string, poolCount
  */
 function calculateStats(
   data: VolumeDataPoint[],
-  totalVolume24h: number,
+  totalVolumePeriod: number,
   poolCount: number
 ): {
   current: number
@@ -642,7 +625,7 @@ function calculateStats(
       peak: 0,
       low: 0,
       average: 0,
-      totalVolume: totalVolume24h,
+      totalVolume: totalVolumePeriod,
       poolCount,
     }
   }
@@ -651,14 +634,6 @@ function calculateStats(
   const current = volumes[volumes.length - 1] || 0
   const previous = volumes[0] || current
   const change = previous > 0 ? ((current - previous) / previous) * 100 : 0
-  const sumVolume = volumes.reduce((sum, v) => sum + v, 0)
-
-  // For snapshot data, the volumes are rolling 24h volumes (not additive)
-  // For OHLCV data, the volumes are per-period (additive)
-  const isSnapshotData = data[0]?.isSnapshot
-  const totalVolume = isSnapshotData
-    ? Math.max(...volumes) // Peak rolling volume for snapshots
-    : sumVolume // Sum for OHLCV
 
   return {
     current,
@@ -666,8 +641,8 @@ function calculateStats(
     change,
     peak: Math.max(...volumes),
     low: Math.min(...volumes.filter(v => v > 0)),
-    average: sumVolume / volumes.length,
-    totalVolume: Math.max(totalVolume, totalVolume24h),
+    average: totalVolumePeriod / volumes.length,
+    totalVolume: totalVolumePeriod,
     poolCount,
   }
 }
@@ -686,7 +661,7 @@ export async function GET(request: Request) {
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     const response: any = {
       history: cached.data,
-      stats: calculateStats(cached.data, cached.totalVolume24h, cached.poolCount),
+      stats: calculateStats(cached.data, cached.totalVolumePeriod, cached.poolCount),
       period,
       dataPoints: cached.data.length,
       cached: true,
@@ -708,6 +683,7 @@ export async function GET(request: Request) {
     data: volumeData,
     synthetic,
     totalVolume24h,
+    totalVolumePeriod,
     poolCount,
     ohlcvCoverage,
     dataSource,
@@ -720,6 +696,7 @@ export async function GET(request: Request) {
     period,
     synthetic,
     totalVolume24h,
+    totalVolumePeriod,
     poolCount,
     ohlcvCoverage,
     dataSource,
@@ -727,7 +704,7 @@ export async function GET(request: Request) {
 
   const response: any = {
     history: volumeData,
-    stats: calculateStats(volumeData, totalVolume24h, poolCount),
+    stats: calculateStats(volumeData, totalVolumePeriod, poolCount),
     period,
     dataPoints: volumeData.length,
     cached: false,
