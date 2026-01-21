@@ -8,7 +8,7 @@ import { useDataFreshness, useNewPoolDetection } from "@/hooks/use-realtime"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { sanitizeSearchInput } from "@/lib/utils"
 import { MetricsGrid } from "./dashboard/metrics-grid"
-import { StaleDataBanner, NewPoolNotification } from "./dashboard/realtime-indicators"
+import { NewPoolNotification } from "./dashboard/realtime-indicators"
 
 // Dynamic import FloatingNav with SSR disabled to prevent hydration mismatch
 // (status indicator depends on client-side data fetching)
@@ -272,17 +272,6 @@ export function BonkDashboard() {
       {/* Main Content */}
       <main className="relative z-10 max-w-[1600px] mx-auto px-4 md:px-6 py-6 pt-36">
         <ErrorBoundary>
-          {/* Stale Data Warning */}
-          <AnimatePresence>
-            {freshness.isStale && (
-              <StaleDataBanner
-                freshness={freshness}
-                onRefresh={refresh}
-                className="mb-4"
-              />
-            )}
-          </AnimatePresence>
-
           {/* Error Banner */}
           {banner && (
             <InfoBanner banner={banner} onDismiss={() => setBanner(null)} />

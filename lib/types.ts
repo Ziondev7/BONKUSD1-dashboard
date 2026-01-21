@@ -22,10 +22,12 @@ export interface Token {
   twitter: string | null
   telegram: string | null
   website: string | null
-  // Safety metrics
+  // Safety metrics (deprecated - kept for backwards compat)
   safetyScore: number
   safetyLevel: 'safe' | 'caution' | 'risky'
   safetyWarnings: string[]
+  // Holder metrics
+  holders?: number
   // Real-time tracking
   prevPrice?: number
   priceDirection?: 'up' | 'down' | 'neutral'

@@ -14,16 +14,10 @@ import {
   Star,
   ArrowUpDown,
   Flame,
-  Zap,
-  ExternalLink,
-  Shield,
-  ShieldAlert,
-  ShieldCheck,
-  AlertTriangle,
 } from "lucide-react"
 import Image from "next/image"
 import type { Token } from "@/lib/types"
-import { formatNumber, formatPrice, formatAge, isNewToken, cn, getSafetyWarningExplanation } from "@/lib/utils"
+import { formatNumber, formatPrice, formatAge, isNewToken, cn } from "@/lib/utils"
 
 interface TokenTableProps {
   tokens: Token[]
@@ -130,79 +124,33 @@ const MiniSparkline = memo(function MiniSparkline({
   )
 })
 
-// Safety badge component
-const SafetyBadge = memo(function SafetyBadge({
-  level,
-  score,
-  warnings,
+// Holder count badge component
+const HolderBadge = memo(function HolderBadge({
+  count,
 }: {
-  level: "safe" | "caution" | "risky"
-  score: number
-  warnings: string[]
+  count?: number
 }) {
-  const config = {
-    safe: {
-      icon: ShieldCheck,
-      bg: "bg-success/10",
-      border: "border-success/30",
-      text: "text-success",
-      label: "SAFE",
-    },
-    caution: {
-      icon: Shield,
-      bg: "bg-bonk/10",
-      border: "border-bonk/30",
-      text: "text-bonk",
-      label: "CAUTION",
-    },
-    risky: {
-      icon: ShieldAlert,
-      bg: "bg-danger/10",
-      border: "border-danger/30",
-      text: "text-danger",
-      label: "RISKY",
-    },
-  }[level]
+  // Format holder count
+  const formatHolders = (n?: number) => {
+    if (n === undefined || n === null) return "—"
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+    return n.toString()
+  }
 
-  const Icon = config.icon
+  const displayCount = formatHolders(count)
+  const hasData = count !== undefined && count !== null
 
   return (
-    <div className="group relative">
-      <div
-        className={cn(
-          "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold font-mono border",
-          config.bg,
-          config.border,
-          config.text
-        )}
-      >
-        <Icon className="w-3 h-3" />
-        <span>{score}</span>
-      </div>
-      {/* Tooltip */}
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-[#0a0a0c] border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 min-w-[200px] max-w-[280px]">
-        <div className="flex items-center gap-2 mb-2">
-          <Icon className={cn("w-4 h-4", config.text)} />
-          <span className={cn("font-bold text-xs", config.text)}>{config.label}</span>
-          <span className="text-white/40 text-xs ml-auto">{score}/100</span>
-        </div>
-        {warnings.length > 0 && (
-          <div className="space-y-2 pt-2 border-t border-white/[0.06]">
-            {warnings.map((warning, i) => (
-              <div key={i} className="text-[10px] text-white/50">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <AlertTriangle className="w-2.5 h-2.5 text-bonk flex-shrink-0" />
-                  <span className="font-bold text-white/70">{warning}</span>
-                </div>
-                <p className="pl-4 text-white/40 leading-relaxed">
-                  {getSafetyWarningExplanation(warning)}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-white/10" />
-      </div>
+    <div
+      className={cn(
+        "flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold font-mono border",
+        hasData
+          ? "bg-white/[0.04] border-white/[0.08] text-white/70"
+          : "bg-white/[0.02] border-white/[0.04] text-white/30"
+      )}
+    >
+      <span>{displayCount}</span>
     </div>
   )
 })
@@ -311,20 +259,6 @@ export function TokenTable({
           )}
         </div>
         
-        <div className="flex items-center gap-3 text-xs font-mono text-white/40">
-          <div className="flex items-center gap-1">
-            <ShieldCheck className="w-3 h-3 text-success" />
-            <span>Safe</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Shield className="w-3 h-3 text-bonk" />
-            <span>Caution</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <ShieldAlert className="w-3 h-3 text-danger" />
-            <span>Risky</span>
-          </div>
-        </div>
       </div>
 
       {/* Table */}
@@ -360,11 +294,11 @@ export function TokenTable({
               >
                 AGE
               </th>
-              <th 
+              <th
                 className="text-left text-white/40 font-mono text-[10px] tracking-[0.15em] uppercase py-4 px-4 w-[70px]"
                 style={{ backgroundColor: "rgba(5, 5, 5, 0.95)" }}
               >
-                SAFETY
+                HOLDERS
               </th>
               <th 
                 className="text-left text-white/40 font-mono text-[10px] tracking-[0.15em] uppercase py-4 px-4 w-[100px]"
@@ -527,13 +461,9 @@ export function TokenTable({
                       </p>
                     </td>
 
-                    {/* Safety Score */}
+                    {/* Holders */}
                     <td className="py-4 px-4">
-                      <SafetyBadge
-                        level={token.safetyLevel || 'caution'}
-                        score={token.safetyScore || 50}
-                        warnings={token.safetyWarnings || []}
-                      />
+                      <HolderBadge count={token.holders} />
                     </td>
 
 {/* Action */}
