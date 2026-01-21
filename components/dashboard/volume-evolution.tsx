@@ -138,7 +138,7 @@ function VolumeChart({
 
   if (data.length < 2) {
     return (
-      <div className="h-48 flex items-center justify-center text-white/30 font-mono text-sm">
+      <div className="h-full flex items-center justify-center text-white/30 font-mono text-sm">
         Not enough data points
       </div>
     )
@@ -148,9 +148,9 @@ function VolumeChart({
   const gap = Math.max(1, (100 / data.length) * 0.3)
 
   return (
-    <div className="relative h-56">
+    <div className="relative h-full">
       {/* Chart container */}
-      <div className="absolute inset-0 flex items-end justify-between px-1 pb-8">
+      <div className="absolute inset-0 flex items-end justify-between px-1 pb-5">
         {data.map((d, i) => {
           const heightPercent = max > 0 ? ((d.volume - min) / (max - min)) * 100 : 0
           const isHovered = hoveredBar?.index === i
@@ -191,7 +191,7 @@ function VolumeChart({
       </div>
 
       {/* X-axis time labels */}
-      <div className="absolute bottom-0 left-0 right-0 flex justify-between px-1 text-[10px] font-mono text-white/30">
+      <div className="absolute bottom-0 left-0 right-0 flex justify-between px-1 h-5 text-[9px] font-mono text-white/30">
         {timeLabels.map((item, i) => (
           <span 
             key={i} 
@@ -208,7 +208,7 @@ function VolumeChart({
       </div>
 
       {/* Grid lines */}
-      <div className="absolute inset-0 pointer-events-none pb-8">
+      <div className="absolute inset-0 pointer-events-none pb-5">
         {[0.25, 0.5, 0.75].map((ratio, i) => (
           <div
             key={i}
