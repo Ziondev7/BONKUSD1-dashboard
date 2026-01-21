@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server"
+import {
+  getAllDailyVolume,
+  getDailyVolumeStats,
+} from "@/lib/volume-store"
 
 // ============================================
 // CONFIGURATION
@@ -7,11 +11,17 @@ const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 
-// Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
-const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
+// Dune Analytics API for fallback when KV is empty
+const DUNE_API = "https://api.dune.com/api/v1"
+const DUNE_QUERY_ID = "6572422" // BonkFun USD1 Daily Volume query
+const DUNE_TOKEN_LIST_QUERY_ID = "6575979" // BonkFun token mint list query
+
+// Cache TTL for BonkFun token list (refresh every 6 hours)
+const TOKEN_LIST_CACHE_TTL = 6 * 60 * 60 * 1000
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
+const DUNE_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for Dune data (fallback only)
 const OHLCV_BATCH_SIZE = 5 // Fetch OHLCV for top 5 pools per batch (rate limit friendly)
 const MAX_OHLCV_POOLS = 30 // Maximum pools to fetch OHLCV from
 
@@ -47,14 +57,50 @@ interface CacheEntry {
   period: string
   synthetic: boolean
   totalVolume24h: number
-  poolCount: number
+  poolCount: number // Unique tokens that traded in the period (historical) or active pools (live)
+  livePoolCount?: number // Current active pools from Raydium (optional)
   ohlcvCoverage: number // Percentage of volume covered by real OHLCV
+  source: "kv" | "dune" | "raydium" | "synthetic"
+}
+
+// Dune API response types
+interface DuneVolumeRow {
+  date: string
+  num_trades: number
+  unique_tokens: number
+  total_volume_usd: number
+}
+
+interface DuneApiResponse {
+  execution_id: string
+  query_id: number
+  state: string
+  result?: {
+    rows: DuneVolumeRow[]
+    metadata: {
+      column_names: string[]
+      result_set_bytes: number
+      total_row_count: number
+    }
+  }
 }
 
 // ============================================
 // IN-MEMORY CACHE
 // ============================================
 const volumeCache: Map<string, CacheEntry> = new Map()
+
+// Separate cache for Dune data (longer TTL since it's historical)
+let duneDataCache: {
+  data: DuneVolumeRow[]
+  timestamp: number
+} | null = null
+
+// Cache for BonkFun token whitelist (fetched from Dune)
+let bonkfunTokenListCache: {
+  tokens: Set<string>
+  timestamp: number
+} | null = null
 
 // Volume snapshot store for historical tracking
 // (In production, this would be Vercel KV or another persistent store)
@@ -87,10 +133,225 @@ async function fetchWithTimeout(url: string, timeout = 10000): Promise<Response>
   }
 }
 
-function shouldExclude(symbol?: string): boolean {
-  if (!symbol) return false
-  const s = symbol.toUpperCase()
-  return EXCLUDED_SYMBOLS.some(excluded => s === excluded || s.includes(excluded))
+// ============================================
+// BONKFUN TOKEN WHITELIST (from Dune)
+// ============================================
+
+interface DuneTokenListRow {
+  token_mint: string
+}
+
+interface DuneTokenListResponse {
+  execution_id: string
+  query_id: number
+  state: string
+  result?: {
+    rows: DuneTokenListRow[]
+    metadata: {
+      column_names: string[]
+      result_set_bytes: number
+      total_row_count: number
+    }
+  }
+}
+
+/**
+ * Fetch the list of valid BonkFun token mints from Dune
+ * These are tokens created via LaunchLab with LetsBonk platform, paired with USD1
+ */
+async function fetchBonkFunTokenList(): Promise<Set<string>> {
+  // Check cache first
+  if (bonkfunTokenListCache && Date.now() - bonkfunTokenListCache.timestamp < TOKEN_LIST_CACHE_TTL) {
+    console.log(`[Volume] Using cached BonkFun token list (${bonkfunTokenListCache.tokens.size} tokens)`)
+    return bonkfunTokenListCache.tokens
+  }
+
+  const duneApiKey = process.env.DUNE_API_KEY
+  if (!duneApiKey) {
+    console.log("[Volume] No DUNE_API_KEY configured, cannot fetch token whitelist")
+    return new Set()
+  }
+
+  try {
+    console.log("[Volume] Fetching BonkFun token list from Dune...")
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout for large result set
+
+    // Fetch all tokens (up to 150k) - query now only returns USD1 paired tokens
+    const response = await fetch(
+      `${DUNE_API}/query/${DUNE_TOKEN_LIST_QUERY_ID}/results?limit=150000`,
+      {
+        signal: controller.signal,
+        headers: {
+          "x-dune-api-key": duneApiKey,
+          Accept: "application/json",
+        },
+      }
+    )
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      console.error("[Volume] Dune token list API error:", response.status)
+      return bonkfunTokenListCache?.tokens || new Set()
+    }
+
+    const data: DuneTokenListResponse = await response.json()
+
+    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
+      console.error("[Volume] Dune token list query not ready or no results")
+      return bonkfunTokenListCache?.tokens || new Set()
+    }
+
+    const tokens = new Set<string>()
+    for (const row of data.result.rows) {
+      if (row.token_mint) {
+        tokens.add(row.token_mint)
+      }
+    }
+
+    console.log(`[Volume] Fetched ${tokens.size} BonkFun token mints from Dune`)
+
+    // Cache the token list
+    bonkfunTokenListCache = {
+      tokens,
+      timestamp: Date.now(),
+    }
+
+    return tokens
+  } catch (error) {
+    console.error("[Volume] Error fetching BonkFun token list:", error)
+    return bonkfunTokenListCache?.tokens || new Set()
+  }
+}
+
+/**
+ * Check if a token mint is a valid BonkFun token
+ */
+async function isBonkFunToken(mintAddress: string): Promise<boolean> {
+  const tokenList = await fetchBonkFunTokenList()
+  return tokenList.has(mintAddress)
+}
+
+// ============================================
+// DUNE API FETCHER (Primary source for historical data)
+// ============================================
+
+/**
+ * Fetch historical volume data from Dune Analytics
+ * This provides accurate on-chain data for the BonkFun USD1 ecosystem
+ */
+async function fetchDuneVolumeHistory(): Promise<DuneVolumeRow[] | null> {
+  // Check cache first
+  if (duneDataCache && Date.now() - duneDataCache.timestamp < DUNE_CACHE_TTL) {
+    console.log("[Volume] Using cached Dune data")
+    return duneDataCache.data
+  }
+
+  const duneApiKey = process.env.DUNE_API_KEY
+  if (!duneApiKey) {
+    console.log("[Volume] No DUNE_API_KEY configured, falling back to Raydium")
+    return null
+  }
+
+  try {
+    console.log("[Volume] Fetching historical data from Dune Analytics...")
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+    const response = await fetch(
+      `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=1000`,
+      {
+        signal: controller.signal,
+        headers: {
+          "x-dune-api-key": duneApiKey,
+          Accept: "application/json",
+        },
+      }
+    )
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      console.error("[Volume] Dune API error:", response.status)
+      return null
+    }
+
+    const data: DuneApiResponse = await response.json()
+
+    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
+      console.error("[Volume] Dune query not ready or no results")
+      return null
+    }
+
+    const rows = data.result.rows
+    console.log(`[Volume] Fetched ${rows.length} days of historical data from Dune`)
+
+    // Cache the data
+    duneDataCache = {
+      data: rows,
+      timestamp: Date.now(),
+    }
+
+    return rows
+  } catch (error) {
+    console.error("[Volume] Error fetching from Dune:", error)
+    return null
+  }
+}
+
+/**
+ * Convert Dune data to VolumeDataPoint format
+ */
+function convertDuneToVolumeData(
+  duneRows: DuneVolumeRow[],
+  period: string
+): { data: VolumeDataPoint[]; totalVolume: number; uniqueTokens: number } {
+  const now = Date.now()
+  let cutoffTime: number
+
+  switch (period) {
+    case "24h":
+      cutoffTime = now - 24 * 60 * 60 * 1000
+      break
+    case "7d":
+      cutoffTime = now - 7 * 24 * 60 * 60 * 1000
+      break
+    case "1m":
+      cutoffTime = now - 30 * 24 * 60 * 60 * 1000
+      break
+    case "all":
+      cutoffTime = 0
+      break
+    default:
+      cutoffTime = now - 24 * 60 * 60 * 1000
+  }
+
+  // Filter and convert rows
+  const filteredRows = duneRows
+    .map(row => ({
+      timestamp: new Date(row.date).getTime(),
+      volume: row.total_volume_usd,
+      trades: row.num_trades,
+      uniqueTokens: row.unique_tokens,
+    }))
+    .filter(row => row.timestamp >= cutoffTime && row.timestamp <= now)
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+  const data: VolumeDataPoint[] = filteredRows.map(row => ({
+    timestamp: row.timestamp,
+    volume: Math.round(row.volume),
+    trades: row.trades,
+    poolCount: row.uniqueTokens,
+    isOhlcv: true, // Dune data is real on-chain data
+  }))
+
+  const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
+  const uniqueTokens = Math.max(...filteredRows.map(r => r.uniqueTokens), 0)
+
+  return { data, totalVolume, uniqueTokens }
 }
 
 // ============================================
@@ -111,6 +372,16 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
   let totalLiquidity = 0
 
   try {
+    // First, fetch the BonkFun token whitelist from Dune
+    const bonkfunTokens = await fetchBonkFunTokenList()
+    const useWhitelist = bonkfunTokens.size > 0
+
+    if (useWhitelist) {
+      console.log(`[Volume] Using BonkFun token whitelist (${bonkfunTokens.size} tokens)`)
+    } else {
+      console.log("[Volume] WARNING: No BonkFun token whitelist available, results may include non-BonkFun tokens")
+    }
+
     const pageSize = 500
     const maxPages = 5
     const poolMap = new Map<string, PoolVolumeData>()
@@ -144,8 +415,10 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
       const pairedSymbol = isAUSD1 ? symbolB : symbolA
       const pairedMint = isAUSD1 ? mintB : mintA
 
-      // Exclude non-BONK.fun tokens
-      if (shouldExclude(pairedSymbol)) return
+      // Use whitelist to only include verified BonkFun tokens
+      if (useWhitelist) {
+        if (!bonkfunTokens.has(pairedMint)) return
+      }
 
       const volume24h = pool.day?.volume || 0
       const liquidity = pool.tvl || 0
@@ -198,7 +471,7 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
     // Sort by volume descending
     pools.sort((a, b) => b.volume24h - a.volume24h)
 
-    console.log(`[Volume] Found ${pools.length} BONK.fun/USD1 pools with total 24h volume: $${totalVolume24h.toLocaleString()}`)
+    console.log(`[Volume] Found ${pools.length} verified BonkFun/USD1 pools with total 24h volume: $${totalVolume24h.toLocaleString()}`)
   } catch (error) {
     console.error("[Volume] Error fetching Raydium pools:", error)
   }
@@ -323,32 +596,286 @@ function getStoredSnapshots(period: string): VolumeSnapshot[] {
 }
 
 // ============================================
+// VERCEL KV DATA FETCHER (Primary source)
+// ============================================
+
+/**
+ * Aggregate daily data into weekly data points
+ * Used for ALL period to show weekly candles
+ */
+function aggregateToWeekly(dailyData: VolumeDataPoint[]): VolumeDataPoint[] {
+  if (dailyData.length === 0) return []
+
+  const weeklyMap = new Map<number, { volume: number; trades: number; poolCount: number; count: number }>()
+
+  for (const day of dailyData) {
+    // Get the start of the week (Monday) for this day
+    const date = new Date(day.timestamp)
+    const dayOfWeek = date.getUTCDay()
+    // Adjust to get Monday as start of week (0 = Sunday, so we shift)
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    const weekStart = new Date(date)
+    weekStart.setUTCDate(date.getUTCDate() - daysToMonday)
+    weekStart.setUTCHours(0, 0, 0, 0)
+    const weekTimestamp = weekStart.getTime()
+
+    const existing = weeklyMap.get(weekTimestamp)
+    if (existing) {
+      existing.volume += day.volume
+      existing.trades += day.trades
+      existing.poolCount = Math.max(existing.poolCount, day.poolCount || 0)
+      existing.count++
+    } else {
+      weeklyMap.set(weekTimestamp, {
+        volume: day.volume,
+        trades: day.trades,
+        poolCount: day.poolCount || 0,
+        count: 1,
+      })
+    }
+  }
+
+  // Convert map to array
+  const weeklyData: VolumeDataPoint[] = []
+  weeklyMap.forEach((data, timestamp) => {
+    weeklyData.push({
+      timestamp,
+      volume: data.volume,
+      trades: data.trades,
+      poolCount: data.poolCount,
+      isOhlcv: true,
+    })
+  })
+
+  // Sort by timestamp
+  weeklyData.sort((a, b) => a.timestamp - b.timestamp)
+
+  return weeklyData
+}
+
+/**
+ * Fetch historical volume data from Vercel KV
+ * This is the primary source for historical data (fast, ~5ms)
+ */
+async function fetchKVVolumeHistory(period: string): Promise<{
+  data: VolumeDataPoint[]
+  totalVolume: number
+  uniqueTokens: number
+} | null> {
+  try {
+    const stats = await getDailyVolumeStats()
+
+    if (stats.count === 0) {
+      console.log("[Volume] KV is empty, need to seed first")
+      return null
+    }
+
+    const allData = await getAllDailyVolume()
+
+    if (!allData || allData.length === 0) {
+      return null
+    }
+
+    // Filter by period
+    const now = Date.now()
+    let cutoffTime: number
+
+    switch (period) {
+      case "24h":
+        cutoffTime = now - 24 * 60 * 60 * 1000
+        break
+      case "7d":
+        cutoffTime = now - 7 * 24 * 60 * 60 * 1000
+        break
+      case "1m":
+        cutoffTime = now - 30 * 24 * 60 * 60 * 1000
+        break
+      case "all":
+        cutoffTime = 0
+        break
+      default:
+        cutoffTime = now - 24 * 60 * 60 * 1000
+    }
+
+    const filteredData = allData
+      .filter(d => d.timestamp >= cutoffTime && d.timestamp <= now)
+      .sort((a, b) => a.timestamp - b.timestamp)
+
+    let data: VolumeDataPoint[] = filteredData.map(d => ({
+      timestamp: d.timestamp,
+      volume: d.volume,
+      trades: d.trades,
+      poolCount: d.uniqueTokens,
+      isOhlcv: true, // KV data is accurate historical data
+    }))
+
+    // For ALL period, aggregate to weekly candles
+    if (period === "all" && data.length > 30) {
+      data = aggregateToWeekly(data)
+      console.log(`[Volume] KV returned ${filteredData.length} days, aggregated to ${data.length} weekly candles`)
+    } else {
+      console.log(`[Volume] KV returned ${data.length} days of historical data`)
+    }
+
+    const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
+    const uniqueTokens = Math.max(...filteredData.map(d => d.uniqueTokens), 0)
+
+    return { data, totalVolume, uniqueTokens }
+  } catch (error) {
+    console.error("[Volume] KV fetch error:", error)
+    return null
+  }
+}
+
+/**
+ * Fetch today's live 24h volume from Raydium
+ */
+async function fetchTodayLiveVolume(): Promise<{
+  volume24h: number
+  poolCount: number
+  uniqueTokens: number
+} | null> {
+  try {
+    const { pools, totalVolume24h } = await fetchAllRaydiumUSD1Pools()
+
+    if (pools.length === 0) {
+      return null
+    }
+
+    const uniqueTokens = new Set<string>()
+    pools.forEach(p => uniqueTokens.add(p.symbol))
+
+    return {
+      volume24h: totalVolume24h,
+      poolCount: pools.length,
+      uniqueTokens: uniqueTokens.size,
+    }
+  } catch (error) {
+    console.error("[Volume] Error fetching today's live volume:", error)
+    return null
+  }
+}
+
+// ============================================
 // MAIN VOLUME HISTORY LOGIC
 // ============================================
 
 /**
  * Main function to fetch accurate volume history
  * Strategy:
- * 1. Get ALL pools and their 24h volumes from Raydium (source of truth for totals)
- * 2. Fetch OHLCV from top pools by volume to get time distribution
- * 3. Scale the OHLCV data to match the actual total volume
- * 4. Fallback to realistic distribution if OHLCV unavailable
+ * 1. Try Vercel KV first (fast, persistent historical data)
+ * 2. Add today's live volume from Raydium
+ * 3. Fallback to Dune Analytics if KV is empty
+ * 4. Final fallback to Raydium + synthetic distribution
  */
 async function fetchBonkFunVolumeHistory(period: string): Promise<{
   data: VolumeDataPoint[]
   synthetic: boolean
   totalVolume24h: number
   poolCount: number
+  livePoolCount?: number
   ohlcvCoverage: number
+  source: "kv" | "dune" | "raydium" | "synthetic"
 }> {
   console.log(`[Volume] Fetching BONK.fun/USD1 volume data for period: ${period}`)
+
+  // ========================================
+  // STEP 1: Try Vercel KV (primary source - instant)
+  // ========================================
+  const kvData = await fetchKVVolumeHistory(period)
+
+  // For 24h period, we need hourly data - KV only has daily, so skip to OHLCV fallback
+  const minDataPointsFor24h = 6 // Need at least 6 hourly points for a decent 24h chart
+
+  if (kvData && kvData.data.length > 0 && (period !== "24h" || kvData.data.length >= minDataPointsFor24h)) {
+    // Get today's live volume from Raydium
+    const todayLive = await fetchTodayLiveVolume()
+
+    let finalData = [...kvData.data]
+    let totalVolume24h = todayLive?.volume24h || kvData.data[kvData.data.length - 1]?.volume || 0
+
+    // If we have today's live data and it's for a different day, add it
+    if (todayLive) {
+      const todayStart = new Date().setUTCHours(0, 0, 0, 0)
+      const lastDataTimestamp = kvData.data[kvData.data.length - 1]?.timestamp || 0
+
+      // Only add today's data if it's newer than what we have in KV
+      if (todayStart > lastDataTimestamp) {
+        finalData.push({
+          timestamp: todayStart,
+          volume: todayLive.volume24h,
+          trades: 0,
+          poolCount: todayLive.uniqueTokens,
+          isOhlcv: true,
+        })
+      }
+    }
+
+    // For historical periods (7D, 1M, ALL), use the unique tokens count from KV
+    // This shows how many different tokens traded during that period
+    // For 24H, we'll use live pool count from Raydium (handled in fallback path)
+    const historicalPoolCount = kvData.uniqueTokens
+    const livePoolCount = todayLive?.poolCount || historicalPoolCount
+
+    console.log(`[Volume] Using KV data: ${finalData.length} data points, $${totalVolume24h.toLocaleString()} 24h volume, ${historicalPoolCount} unique tokens`)
+
+    return {
+      data: finalData,
+      synthetic: false,
+      totalVolume24h: Math.round(totalVolume24h),
+      poolCount: historicalPoolCount, // Always use historical unique tokens for KV data
+      livePoolCount, // Also include live count for UI if needed
+      ohlcvCoverage: 100,
+      source: "kv",
+    }
+  }
+
+  // ========================================
+  // STEP 2: Fallback to Dune Analytics (if KV is empty)
+  // Skip for 24h since Dune only has daily data too
+  // ========================================
+  if (period === "24h") {
+    console.log("[Volume] Skipping Dune for 24h (need hourly data), going to Raydium OHLCV...")
+  }
+
+  const duneData = period !== "24h" ? await fetchDuneVolumeHistory() : null
+
+  if (duneData && duneData.length > 0) {
+    const { data, totalVolume, uniqueTokens } = convertDuneToVolumeData(duneData, period)
+
+    if (data.length > 0) {
+      // Get the most recent day's volume as "24h volume"
+      const sortedByDate = [...duneData].sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+      )
+      const latestDayVolume = sortedByDate[0]?.total_volume_usd || totalVolume
+
+      console.log(`[Volume] Using Dune data: ${data.length} data points, $${latestDayVolume.toLocaleString()} latest day volume`)
+      console.log("[Volume] Consider seeding KV with: POST /api/volume/seed")
+
+      return {
+        data,
+        synthetic: false,
+        totalVolume24h: Math.round(latestDayVolume),
+        poolCount: uniqueTokens, // Historical unique tokens count
+        // livePoolCount not available from Dune fallback
+        ohlcvCoverage: 100,
+        source: "dune",
+      }
+    }
+  }
+
+  // ========================================
+  // STEP 3: Fallback to Raydium + OHLCV
+  // ========================================
+  console.log("[Volume] Dune unavailable, falling back to Raydium...")
 
   // Step 1: Get ALL pools from Raydium
   const { pools, totalVolume24h, totalLiquidity } = await fetchAllRaydiumUSD1Pools()
 
   if (pools.length === 0 || totalVolume24h === 0) {
     console.log("[Volume] No BONK.fun/USD1 pools found")
-    return { data: [], synthetic: true, totalVolume24h: 0, poolCount: 0, ohlcvCoverage: 0 }
+    return { data: [], synthetic: true, totalVolume24h: 0, poolCount: 0, livePoolCount: 0, ohlcvCoverage: 0, source: "synthetic" }
   }
 
   // Record snapshot for historical tracking
@@ -452,8 +979,10 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       data: scaledData,
       synthetic: false,
       totalVolume24h,
-      poolCount: pools.length,
+      poolCount: pools.length, // For 24H, this is live active pools
+      livePoolCount: pools.length,
       ohlcvCoverage,
+      source: "raydium",
     }
   }
 
@@ -467,7 +996,9 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
     synthetic: true,
     totalVolume24h,
     poolCount: pools.length,
+    livePoolCount: pools.length,
     ohlcvCoverage: 0,
+    source: "synthetic",
   }
 }
 
@@ -622,7 +1153,9 @@ export async function GET(request: Request) {
       cached: true,
       synthetic: cached.synthetic,
       poolCount: cached.poolCount,
+      livePoolCount: cached.livePoolCount,
       ohlcvCoverage: cached.ohlcvCoverage,
+      source: cached.source,
     })
   }
 
@@ -632,7 +1165,9 @@ export async function GET(request: Request) {
     synthetic,
     totalVolume24h,
     poolCount,
+    livePoolCount,
     ohlcvCoverage,
+    source,
   } = await fetchBonkFunVolumeHistory(period)
 
   // Update cache
@@ -643,7 +1178,9 @@ export async function GET(request: Request) {
     synthetic,
     totalVolume24h,
     poolCount,
+    livePoolCount,
     ohlcvCoverage,
+    source,
   })
 
   return NextResponse.json({
@@ -654,7 +1191,9 @@ export async function GET(request: Request) {
     cached: false,
     synthetic,
     poolCount,
+    livePoolCount,
     ohlcvCoverage,
+    source,
   })
 }
 

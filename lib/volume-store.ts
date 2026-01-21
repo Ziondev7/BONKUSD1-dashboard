@@ -18,6 +18,19 @@ export interface VolumeSnapshot {
   poolCount: number
 }
 
+/**
+ * Daily volume data stored in KV for historical tracking
+ * This is the primary format for persistent storage
+ */
+export interface DailyVolumeData {
+  date: string // YYYY-MM-DD format
+  timestamp: number // Start of day timestamp (UTC)
+  volume: number // Total USD volume for the day
+  trades: number // Number of trades
+  uniqueTokens: number // Number of unique tokens traded
+  source: "dune" | "raydium" | "cron" // Data source
+}
+
 export interface VolumeStoreConfig {
   maxSnapshots: number
   snapshotIntervalMs: number
@@ -31,29 +44,30 @@ const DEFAULT_CONFIG: VolumeStoreConfig = {
 // In-memory storage (works without Vercel KV)
 const memoryStore: VolumeSnapshot[] = []
 
-// Type for Vercel KV module
-interface KVModule {
-  kv: {
-    zrange: (key: string, start: number, end: number, options?: { byScore?: boolean }) => Promise<string[] | null>
-    zadd: (key: string, member: { score: number; member: string }) => Promise<number>
-    zcard: (key: string) => Promise<number>
-    zremrangebyrank: (key: string, start: number, end: number) => Promise<number>
-  }
+// Type for Vercel KV
+interface KVClient {
+  zrange: (key: string, start: number, end: number, options?: { byScore?: boolean }) => Promise<unknown[] | null>
+  zadd: (key: string, options: { score: number; member: string }) => Promise<number | null>
+  zcard: (key: string) => Promise<number>
+  zremrangebyrank: (key: string, start: number, end: number) => Promise<number>
+  set: (key: string, value: unknown) => Promise<string | null>
+  get: (key: string) => Promise<unknown | null>
 }
 
 /**
  * Dynamically load Vercel KV if available
  */
-async function getKV(): Promise<KVModule["kv"] | null> {
+async function getKV(): Promise<KVClient | null> {
   if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
     return null
   }
 
   try {
-    // Dynamic import with type assertion
-    const kvModule = await import("@vercel/kv") as unknown as KVModule
-    return kvModule.kv
-  } catch {
+    // Dynamic import - @vercel/kv exports kv as named export
+    const module = await import("@vercel/kv")
+    return module.kv as KVClient
+  } catch (e) {
+    console.error("[VolumeStore] Failed to load @vercel/kv:", e)
     return null
   }
 }
@@ -272,4 +286,321 @@ export async function getStorageStatus(): Promise<{
     oldestTimestamp: memoryStore[0]?.timestamp || null,
     newestTimestamp: memoryStore[memoryStore.length - 1]?.timestamp || null,
   }
+}
+
+// ============================================
+// DAILY VOLUME STORAGE (Persistent Historical Data)
+// ============================================
+
+// In-memory fallback for daily volume data
+const dailyVolumeMemoryStore: DailyVolumeData[] = []
+
+const DAILY_VOLUME_KEY = "volume:daily"
+
+/**
+ * Save daily volume data to KV storage
+ * Uses date as the unique key to prevent duplicates
+ */
+export async function saveDailyVolume(data: DailyVolumeData): Promise<boolean> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      const key = `${DAILY_VOLUME_KEY}:${data.date}`
+      await kv.set(key, JSON.stringify(data))
+
+      // Update the dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      const dates: string[] = datesJson
+        ? (typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[])
+        : []
+
+      if (!dates.includes(data.date)) {
+        dates.push(data.date)
+        dates.sort()
+        await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
+      }
+      return true
+    } catch (error) {
+      console.error("[VolumeStore] KV error saving daily volume:", error)
+    }
+  }
+
+  // Fallback to memory
+  const existingIndex = dailyVolumeMemoryStore.findIndex(d => d.date === data.date)
+  if (existingIndex >= 0) {
+    dailyVolumeMemoryStore[existingIndex] = data
+  } else {
+    dailyVolumeMemoryStore.push(data)
+    dailyVolumeMemoryStore.sort((a, b) => a.timestamp - b.timestamp)
+  }
+  return true
+}
+
+/**
+ * Bulk save daily volume data (for seeding from Dune)
+ * Uses simple key-value storage with date as key for reliability
+ */
+export async function bulkSaveDailyVolume(dataArray: DailyVolumeData[]): Promise<{
+  success: boolean
+  saved: number
+  errors: number
+}> {
+  const kv = await getKV()
+  let saved = 0
+  let errors = 0
+
+  if (kv) {
+    // Test KV connection first
+    let kvWorking = false
+    try {
+      await kv.set("volume:test", "test-value")
+      console.log("[VolumeStore] KV connection test passed")
+      kvWorking = true
+    } catch (testError) {
+      console.error("[VolumeStore] KV connection test FAILED:", testError instanceof Error ? testError.message : testError)
+    }
+
+    if (kvWorking) {
+      // Save each record with date as key
+      for (const data of dataArray) {
+        try {
+          const key = `${DAILY_VOLUME_KEY}:${data.date}`
+          await kv.set(key, JSON.stringify(data))
+          saved++
+          if (saved === 1) {
+            console.log(`[VolumeStore] First record saved successfully: ${data.date}`)
+          }
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error)
+          if (errors === 0) {
+            console.error(`[VolumeStore] First error saving ${data.date}:`, errMsg)
+          }
+          errors++
+        }
+      }
+      // Store the list of dates for iteration
+      if (saved > 0) {
+        try {
+          const dates = dataArray.map(d => d.date).sort()
+          await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
+        } catch (e) {
+          console.error("[VolumeStore] Error saving dates index:", e)
+        }
+      }
+      return { success: errors === 0, saved, errors }
+    }
+  }
+
+  // Fallback to memory
+  for (const data of dataArray) {
+    const existingIndex = dailyVolumeMemoryStore.findIndex(d => d.date === data.date)
+    if (existingIndex >= 0) {
+      dailyVolumeMemoryStore[existingIndex] = data
+    } else {
+      dailyVolumeMemoryStore.push(data)
+    }
+    saved++
+  }
+  dailyVolumeMemoryStore.sort((a, b) => a.timestamp - b.timestamp)
+
+  return { success: true, saved, errors: 0 }
+}
+
+/**
+ * Get daily volume data for a date range
+ */
+export async function getDailyVolume(
+  fromDate: string, // YYYY-MM-DD
+  toDate?: string // YYYY-MM-DD, defaults to today
+): Promise<DailyVolumeData[]> {
+  const fromTimestamp = new Date(fromDate + "T00:00:00Z").getTime()
+  const toTimestamp = toDate
+    ? new Date(toDate + "T23:59:59Z").getTime()
+    : Date.now()
+
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) return []
+
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+      // Filter dates in range and fetch data
+      const results: DailyVolumeData[] = []
+      for (const date of dates) {
+        const dateTimestamp = new Date(date + "T00:00:00Z").getTime()
+        if (dateTimestamp >= fromTimestamp && dateTimestamp <= toTimestamp) {
+          const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${date}`)
+          if (dataJson) {
+            const data = typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson
+            results.push(data as DailyVolumeData)
+          }
+        }
+      }
+      return results.sort((a, b) => a.timestamp - b.timestamp)
+    } catch (error) {
+      console.error("[VolumeStore] KV error fetching daily volume:", error)
+    }
+  }
+
+  // Fallback to memory
+  return dailyVolumeMemoryStore.filter(
+    d => d.timestamp >= fromTimestamp && d.timestamp <= toTimestamp
+  )
+}
+
+/**
+ * Get all daily volume data (for charting)
+ */
+export async function getAllDailyVolume(): Promise<DailyVolumeData[]> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      // Get the dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) return []
+
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+      // Fetch all records
+      const results: DailyVolumeData[] = []
+      for (const date of dates) {
+        const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${date}`)
+        if (dataJson) {
+          const data = typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson
+          results.push(data as DailyVolumeData)
+        }
+      }
+      return results.sort((a, b) => a.timestamp - b.timestamp)
+    } catch (error) {
+      console.error("[VolumeStore] KV error fetching all daily volume:", error)
+    }
+  }
+
+  return [...dailyVolumeMemoryStore]
+}
+
+/**
+ * Get the latest daily volume entry
+ */
+export async function getLatestDailyVolume(): Promise<DailyVolumeData | null> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) return null
+
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+      if (dates.length === 0) return null
+
+      // Get the last date's data
+      const latestDate = dates[dates.length - 1]
+      const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${latestDate}`)
+      if (dataJson) {
+        return (typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson) as DailyVolumeData
+      }
+      return null
+    } catch (error) {
+      console.error("[VolumeStore] KV error fetching latest daily volume:", error)
+    }
+  }
+
+  return dailyVolumeMemoryStore[dailyVolumeMemoryStore.length - 1] || null
+}
+
+/**
+ * Check if we have data for a specific date
+ */
+export async function hasDailyVolumeForDate(date: string): Promise<boolean> {
+  const data = await getDailyVolume(date, date)
+  return data.length > 0
+}
+
+/**
+ * Get daily volume storage stats
+ */
+export async function getDailyVolumeStats(): Promise<{
+  type: "vercel-kv" | "memory"
+  count: number
+  oldestDate: string | null
+  newestDate: string | null
+}> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (!datesJson) {
+        return {
+          type: "vercel-kv",
+          count: 0,
+          oldestDate: null,
+          newestDate: null,
+        }
+      }
+
+      const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+      return {
+        type: "vercel-kv",
+        count: dates.length,
+        oldestDate: dates[0] || null,
+        newestDate: dates[dates.length - 1] || null,
+      }
+    } catch {
+      // Fall through to memory
+    }
+  }
+
+  return {
+    type: "memory",
+    count: dailyVolumeMemoryStore.length,
+    oldestDate: dailyVolumeMemoryStore[0]?.date || null,
+    newestDate: dailyVolumeMemoryStore[dailyVolumeMemoryStore.length - 1]?.date || null,
+  }
+}
+
+/**
+ * Clear all daily volume data (for re-seeding)
+ */
+export async function clearAllDailyVolume(): Promise<boolean> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      // Get dates index
+      const datesJson = await kv.get(`${DAILY_VOLUME_KEY}:index`)
+      if (datesJson) {
+        const dates: string[] = typeof datesJson === "string" ? JSON.parse(datesJson) : datesJson as string[]
+
+        // Delete each date's data
+        for (const date of dates) {
+          try {
+            await kv.set(`${DAILY_VOLUME_KEY}:${date}`, null)
+          } catch {
+            // Ignore individual deletion errors
+          }
+        }
+      }
+
+      // Clear the index
+      await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify([]))
+      console.log("[VolumeStore] Cleared all daily volume data from KV")
+      return true
+    } catch (error) {
+      console.error("[VolumeStore] KV error clearing daily volume:", error)
+    }
+  }
+
+  // Clear memory store
+  dailyVolumeMemoryStore.length = 0
+  return true
 }
