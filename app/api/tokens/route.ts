@@ -553,13 +553,15 @@ async function fetchHolderCountFromHelius(mint: string): Promise<number> {
 
     if (response.ok) {
       const data = await response.json()
+      // Debug log to see actual response
+      console.log(`[Helius] Response for ${mint.slice(0, 8)}...:`, JSON.stringify(data).slice(0, 200))
       // Helius returns { result: { total: number, token_accounts: [...] } }
       if (data.result?.total !== undefined) {
         return data.result.total
       }
     }
-  } catch {
-    // Silent fail
+  } catch (err) {
+    console.log(`[Helius] Error for ${mint.slice(0, 8)}...:`, err)
   }
   return 0
 }
