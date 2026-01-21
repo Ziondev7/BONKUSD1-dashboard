@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server"
+import {
+  getAllDailyVolume,
+  getDailyVolumeStats,
+} from "@/lib/volume-store"
 
 // ============================================
 // CONFIGURATION
@@ -7,7 +11,7 @@ const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
 const RAYDIUM_API = "https://api-v3.raydium.io"
 const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
 
-// Dune Analytics API for accurate on-chain historical data
+// Dune Analytics API for fallback when KV is empty
 const DUNE_API = "https://api.dune.com/api/v1"
 const DUNE_QUERY_ID = "6572422" // BonkFun USD1 Daily Volume query
 
@@ -16,7 +20,7 @@ const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", 
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
-const DUNE_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for Dune data (updates less frequently)
+const DUNE_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for Dune data (fallback only)
 const OHLCV_BATCH_SIZE = 5 // Fetch OHLCV for top 5 pools per batch (rate limit friendly)
 const MAX_OHLCV_POOLS = 30 // Maximum pools to fetch OHLCV from
 
@@ -54,7 +58,7 @@ interface CacheEntry {
   totalVolume24h: number
   poolCount: number
   ohlcvCoverage: number // Percentage of volume covered by real OHLCV
-  source: "dune" | "raydium" | "synthetic"
+  source: "kv" | "dune" | "raydium" | "synthetic"
 }
 
 // Dune API response types
@@ -477,15 +481,117 @@ function getStoredSnapshots(period: string): VolumeSnapshot[] {
 }
 
 // ============================================
+// VERCEL KV DATA FETCHER (Primary source)
+// ============================================
+
+/**
+ * Fetch historical volume data from Vercel KV
+ * This is the primary source for historical data (fast, ~5ms)
+ */
+async function fetchKVVolumeHistory(period: string): Promise<{
+  data: VolumeDataPoint[]
+  totalVolume: number
+  uniqueTokens: number
+} | null> {
+  try {
+    const stats = await getDailyVolumeStats()
+
+    if (stats.count === 0) {
+      console.log("[Volume] KV is empty, need to seed first")
+      return null
+    }
+
+    const allData = await getAllDailyVolume()
+
+    if (!allData || allData.length === 0) {
+      return null
+    }
+
+    // Filter by period
+    const now = Date.now()
+    let cutoffTime: number
+
+    switch (period) {
+      case "24h":
+        cutoffTime = now - 24 * 60 * 60 * 1000
+        break
+      case "7d":
+        cutoffTime = now - 7 * 24 * 60 * 60 * 1000
+        break
+      case "1m":
+        cutoffTime = now - 30 * 24 * 60 * 60 * 1000
+        break
+      case "all":
+        cutoffTime = 0
+        break
+      default:
+        cutoffTime = now - 24 * 60 * 60 * 1000
+    }
+
+    const filteredData = allData
+      .filter(d => d.timestamp >= cutoffTime && d.timestamp <= now)
+      .sort((a, b) => a.timestamp - b.timestamp)
+
+    const data: VolumeDataPoint[] = filteredData.map(d => ({
+      timestamp: d.timestamp,
+      volume: d.volume,
+      trades: d.trades,
+      poolCount: d.uniqueTokens,
+      isOhlcv: true, // KV data is accurate historical data
+    }))
+
+    const totalVolume = data.reduce((sum, d) => sum + d.volume, 0)
+    const uniqueTokens = Math.max(...filteredData.map(d => d.uniqueTokens), 0)
+
+    console.log(`[Volume] KV returned ${data.length} days of historical data`)
+
+    return { data, totalVolume, uniqueTokens }
+  } catch (error) {
+    console.error("[Volume] KV fetch error:", error)
+    return null
+  }
+}
+
+/**
+ * Fetch today's live 24h volume from Raydium
+ */
+async function fetchTodayLiveVolume(): Promise<{
+  volume24h: number
+  poolCount: number
+  uniqueTokens: number
+} | null> {
+  try {
+    const { pools, totalVolume24h } = await fetchAllRaydiumUSD1Pools()
+
+    if (pools.length === 0) {
+      return null
+    }
+
+    const uniqueTokens = new Set<string>()
+    pools.forEach(p => uniqueTokens.add(p.symbol))
+
+    return {
+      volume24h: totalVolume24h,
+      poolCount: pools.length,
+      uniqueTokens: uniqueTokens.size,
+    }
+  } catch (error) {
+    console.error("[Volume] Error fetching today's live volume:", error)
+    return null
+  }
+}
+
+// ============================================
 // MAIN VOLUME HISTORY LOGIC
 // ============================================
 
 /**
  * Main function to fetch accurate volume history
  * Strategy:
- * 1. Try Dune Analytics first (accurate on-chain historical data)
- * 2. Fallback to Raydium + GeckoTerminal OHLCV
- * 3. Final fallback to synthetic distribution
+ * 1. Try Vercel KV first (fast, persistent historical data)
+ * 2. Add today's live volume from Raydium
+ * 3. Fallback to Dune Analytics if KV is empty
+ * 4. Final fallback to Raydium + synthetic distribution
  */
 async function fetchBonkFunVolumeHistory(period: string): Promise<{
   data: VolumeDataPoint[]
@@ -493,13 +599,55 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
   totalVolume24h: number
   poolCount: number
   ohlcvCoverage: number
-  source: "dune" | "raydium" | "synthetic"
+  source: "kv" | "dune" | "raydium" | "synthetic"
 }> {
   console.log(`[Volume] Fetching BONK.fun/USD1 volume data for period: ${period}`)
 
   // ========================================
-  // STEP 1: Try Dune Analytics (primary source)
+  // STEP 1: Try Vercel KV (primary source - instant)
   // ========================================
+  const kvData = await fetchKVVolumeHistory(period)
+
+  if (kvData && kvData.data.length > 0) {
+    // Get today's live volume from Raydium
+    const todayLive = await fetchTodayLiveVolume()
+
+    let finalData = [...kvData.data]
+    let totalVolume24h = todayLive?.volume24h || kvData.data[kvData.data.length - 1]?.volume || 0
+
+    // If we have today's live data and it's for a different day, add it
+    if (todayLive) {
+      const todayStart = new Date().setUTCHours(0, 0, 0, 0)
+      const lastDataTimestamp = kvData.data[kvData.data.length - 1]?.timestamp || 0
+
+      // Only add today's data if it's newer than what we have in KV
+      if (todayStart > lastDataTimestamp) {
+        finalData.push({
+          timestamp: todayStart,
+          volume: todayLive.volume24h,
+          trades: 0,
+          poolCount: todayLive.uniqueTokens,
+          isOhlcv: true,
+        })
+      }
+    }
+
+    console.log(`[Volume] Using KV data: ${finalData.length} data points, $${totalVolume24h.toLocaleString()} 24h volume`)
+
+    return {
+      data: finalData,
+      synthetic: false,
+      totalVolume24h: Math.round(totalVolume24h),
+      poolCount: todayLive?.poolCount || kvData.uniqueTokens,
+      ohlcvCoverage: 100,
+      source: "kv",
+    }
+  }
+
+  // ========================================
+  // STEP 2: Fallback to Dune Analytics (if KV is empty)
+  // ========================================
+  console.log("[Volume] KV empty, trying Dune Analytics...")
   const duneData = await fetchDuneVolumeHistory()
 
   if (duneData && duneData.length > 0) {
@@ -513,20 +661,21 @@ async function fetchBonkFunVolumeHistory(period: string): Promise<{
       const latestDayVolume = sortedByDate[0]?.total_volume_usd || totalVolume
 
       console.log(`[Volume] Using Dune data: ${data.length} data points, $${latestDayVolume.toLocaleString()} latest day volume`)
+      console.log("[Volume] Consider seeding KV with: POST /api/volume/seed")
 
       return {
         data,
         synthetic: false,
         totalVolume24h: Math.round(latestDayVolume),
         poolCount: uniqueTokens,
-        ohlcvCoverage: 100, // Dune data is 100% accurate on-chain data
+        ohlcvCoverage: 100,
         source: "dune",
       }
     }
   }
 
   // ========================================
-  // STEP 2: Fallback to Raydium + OHLCV
+  // STEP 3: Fallback to Raydium + OHLCV
   // ========================================
   console.log("[Volume] Dune unavailable, falling back to Raydium...")
 

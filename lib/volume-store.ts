@@ -18,6 +18,19 @@ export interface VolumeSnapshot {
   poolCount: number
 }
 
+/**
+ * Daily volume data stored in KV for historical tracking
+ * This is the primary format for persistent storage
+ */
+export interface DailyVolumeData {
+  date: string // YYYY-MM-DD format
+  timestamp: number // Start of day timestamp (UTC)
+  volume: number // Total USD volume for the day
+  trades: number // Number of trades
+  uniqueTokens: number // Number of unique tokens traded
+  source: "dune" | "raydium" | "cron" // Data source
+}
+
 export interface VolumeStoreConfig {
   maxSnapshots: number
   snapshotIntervalMs: number
@@ -271,5 +284,224 @@ export async function getStorageStatus(): Promise<{
     snapshotCount: memoryStore.length,
     oldestTimestamp: memoryStore[0]?.timestamp || null,
     newestTimestamp: memoryStore[memoryStore.length - 1]?.timestamp || null,
+  }
+}
+
+// ============================================
+// DAILY VOLUME STORAGE (Persistent Historical Data)
+// ============================================
+
+// In-memory fallback for daily volume data
+const dailyVolumeMemoryStore: DailyVolumeData[] = []
+
+const DAILY_VOLUME_KEY = "volume:daily"
+
+/**
+ * Save daily volume data to KV storage
+ * Uses date as the unique key to prevent duplicates
+ */
+export async function saveDailyVolume(data: DailyVolumeData): Promise<boolean> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      await kv.zadd(DAILY_VOLUME_KEY, {
+        score: data.timestamp,
+        member: JSON.stringify(data),
+      })
+      return true
+    } catch (error) {
+      console.error("[VolumeStore] KV error saving daily volume:", error)
+    }
+  }
+
+  // Fallback to memory
+  const existingIndex = dailyVolumeMemoryStore.findIndex(d => d.date === data.date)
+  if (existingIndex >= 0) {
+    dailyVolumeMemoryStore[existingIndex] = data
+  } else {
+    dailyVolumeMemoryStore.push(data)
+    dailyVolumeMemoryStore.sort((a, b) => a.timestamp - b.timestamp)
+  }
+  return true
+}
+
+/**
+ * Bulk save daily volume data (for seeding from Dune)
+ */
+export async function bulkSaveDailyVolume(dataArray: DailyVolumeData[]): Promise<{
+  success: boolean
+  saved: number
+  errors: number
+}> {
+  const kv = await getKV()
+  let saved = 0
+  let errors = 0
+
+  if (kv) {
+    // Use pipeline for bulk operations
+    for (const data of dataArray) {
+      try {
+        await kv.zadd(DAILY_VOLUME_KEY, {
+          score: data.timestamp,
+          member: JSON.stringify(data),
+        })
+        saved++
+      } catch (error) {
+        console.error(`[VolumeStore] Error saving ${data.date}:`, error)
+        errors++
+      }
+    }
+    return { success: errors === 0, saved, errors }
+  }
+
+  // Fallback to memory
+  for (const data of dataArray) {
+    const existingIndex = dailyVolumeMemoryStore.findIndex(d => d.date === data.date)
+    if (existingIndex >= 0) {
+      dailyVolumeMemoryStore[existingIndex] = data
+    } else {
+      dailyVolumeMemoryStore.push(data)
+    }
+    saved++
+  }
+  dailyVolumeMemoryStore.sort((a, b) => a.timestamp - b.timestamp)
+
+  return { success: true, saved, errors: 0 }
+}
+
+/**
+ * Get daily volume data for a date range
+ */
+export async function getDailyVolume(
+  fromDate: string, // YYYY-MM-DD
+  toDate?: string // YYYY-MM-DD, defaults to today
+): Promise<DailyVolumeData[]> {
+  const fromTimestamp = new Date(fromDate + "T00:00:00Z").getTime()
+  const toTimestamp = toDate
+    ? new Date(toDate + "T23:59:59Z").getTime()
+    : Date.now()
+
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      const results = await kv.zrange(
+        DAILY_VOLUME_KEY,
+        fromTimestamp,
+        toTimestamp,
+        { byScore: true }
+      )
+
+      if (results && Array.isArray(results)) {
+        return results.map(r =>
+          (typeof r === "string" ? JSON.parse(r) : r) as DailyVolumeData
+        )
+      }
+      return []
+    } catch (error) {
+      console.error("[VolumeStore] KV error fetching daily volume:", error)
+    }
+  }
+
+  // Fallback to memory
+  return dailyVolumeMemoryStore.filter(
+    d => d.timestamp >= fromTimestamp && d.timestamp <= toTimestamp
+  )
+}
+
+/**
+ * Get all daily volume data (for charting)
+ */
+export async function getAllDailyVolume(): Promise<DailyVolumeData[]> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      const results = await kv.zrange(DAILY_VOLUME_KEY, 0, -1)
+
+      if (results && Array.isArray(results)) {
+        return results.map(r =>
+          (typeof r === "string" ? JSON.parse(r) : r) as DailyVolumeData
+        )
+      }
+      return []
+    } catch (error) {
+      console.error("[VolumeStore] KV error fetching all daily volume:", error)
+    }
+  }
+
+  return [...dailyVolumeMemoryStore]
+}
+
+/**
+ * Get the latest daily volume entry
+ */
+export async function getLatestDailyVolume(): Promise<DailyVolumeData | null> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      const results = await kv.zrange(DAILY_VOLUME_KEY, -1, -1)
+      if (results && results.length > 0) {
+        return (typeof results[0] === "string" ? JSON.parse(results[0]) : results[0]) as DailyVolumeData
+      }
+      return null
+    } catch (error) {
+      console.error("[VolumeStore] KV error fetching latest daily volume:", error)
+    }
+  }
+
+  return dailyVolumeMemoryStore[dailyVolumeMemoryStore.length - 1] || null
+}
+
+/**
+ * Check if we have data for a specific date
+ */
+export async function hasDailyVolumeForDate(date: string): Promise<boolean> {
+  const data = await getDailyVolume(date, date)
+  return data.length > 0
+}
+
+/**
+ * Get daily volume storage stats
+ */
+export async function getDailyVolumeStats(): Promise<{
+  type: "vercel-kv" | "memory"
+  count: number
+  oldestDate: string | null
+  newestDate: string | null
+}> {
+  const kv = await getKV()
+
+  if (kv) {
+    try {
+      const count = await kv.zcard(DAILY_VOLUME_KEY)
+      const oldest = await kv.zrange(DAILY_VOLUME_KEY, 0, 0)
+      const newest = await kv.zrange(DAILY_VOLUME_KEY, -1, -1)
+
+      const oldestParsed = oldest?.[0]
+        ? (typeof oldest[0] === "string" ? JSON.parse(oldest[0]) : oldest[0]) as DailyVolumeData
+        : null
+      const newestParsed = newest?.[0]
+        ? (typeof newest[0] === "string" ? JSON.parse(newest[0]) : newest[0]) as DailyVolumeData
+        : null
+
+      return {
+        type: "vercel-kv",
+        count,
+        oldestDate: oldestParsed?.date || null,
+        newestDate: newestParsed?.date || null,
+      }
+    } catch {
+      // Fall through to memory
+    }
+  }
+
+  return {
+    type: "memory",
+    count: dailyVolumeMemoryStore.length,
+    oldestDate: dailyVolumeMemoryStore[0]?.date || null,
+    newestDate: dailyVolumeMemoryStore[dailyVolumeMemoryStore.length - 1]?.date || null,
   }
 }
