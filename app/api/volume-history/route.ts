@@ -13,9 +13,9 @@ const DUNE_QUERY_ID = "6572422" // USD1 Daily Volume query - needs per-pool data
 // Tokens to exclude (stablecoins, major tokens - not BONK.fun launched)
 const EXCLUDED_SYMBOLS = ["WLFI", "USD1", "USDC", "USDT", "SOL", "WSOL", "RAY", "FREYA", "REAL", "AOL"]
 
-// Known BONK.fun pool addresses cache (to avoid fetching from Raydium every time)
-let bonkfunPoolsCache: { pools: Set<string>; timestamp: number } | null = null
-const POOLS_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for pool addresses
+// Known BONK.fun token mints cache (to avoid fetching from Raydium every time)
+let bonkfunTokenMintsCache: { mints: Set<string>; timestamp: number } | null = null
+const TOKEN_MINTS_CACHE_TTL = 60 * 60 * 1000 // 1 hour cache for token mints
 
 // Cache configuration
 const CACHE_TTL = 3 * 60 * 1000 // 3 minutes cache for volume history
@@ -23,8 +23,8 @@ const DUNE_CACHE_TTL = 30 * 60 * 1000 // 30 minutes cache for Dune data (updates
 const OHLCV_BATCH_SIZE = 5 // Fetch OHLCV for top 5 pools per batch (rate limit friendly)
 const MAX_OHLCV_POOLS = 30 // Maximum pools to fetch OHLCV from
 
-// Dune data cache
-let duneDataCache: { data: DuneVolumeData[]; timestamp: number } | null = null
+// Dune RAW data cache (unfiltered, so we can re-filter when token list changes)
+let duneRawDataCache: { rows: DuneRawRow[]; timestamp: number } | null = null
 
 // ============================================
 // TYPES
@@ -111,24 +111,24 @@ function shouldExclude(symbol?: string): boolean {
 // ============================================
 
 /**
- * Get cached BONK.fun pool addresses or fetch from Raydium
+ * Get cached BONK.fun token mints or fetch from Raydium
  */
-async function getBonkfunPoolAddresses(): Promise<Set<string>> {
+async function getBonkfunTokenMints(): Promise<Set<string>> {
   // Check cache first
-  if (bonkfunPoolsCache && Date.now() - bonkfunPoolsCache.timestamp < POOLS_CACHE_TTL) {
-    console.log(`[Pools] Using cached BONK.fun pools (${bonkfunPoolsCache.pools.size} pools)`)
-    return bonkfunPoolsCache.pools
+  if (bonkfunTokenMintsCache && Date.now() - bonkfunTokenMintsCache.timestamp < TOKEN_MINTS_CACHE_TTL) {
+    console.log(`[Tokens] Using cached BONK.fun token mints (${bonkfunTokenMintsCache.mints.size} tokens)`)
+    return bonkfunTokenMintsCache.mints
   }
 
   // Fetch fresh pool list from Raydium
   const { pools } = await fetchAllRaydiumUSD1Pools()
-  const poolAddresses = new Set(pools.map(p => p.poolId.toLowerCase()))
+  const tokenMints = new Set(pools.map(p => p.tokenMint.toLowerCase()))
 
   // Update cache
-  bonkfunPoolsCache = { pools: poolAddresses, timestamp: Date.now() }
-  console.log(`[Pools] Cached ${poolAddresses.size} BONK.fun pool addresses`)
+  bonkfunTokenMintsCache = { mints: tokenMints, timestamp: Date.now() }
+  console.log(`[Tokens] Cached ${tokenMints.size} BONK.fun token mints`)
 
-  return poolAddresses
+  return tokenMints
 }
 
 /**
@@ -156,7 +156,7 @@ async function getBonkfunPoolAddresses(): Promise<Set<string>> {
  * GROUP BY 1, 2
  * ORDER BY 1, 2
  */
-async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<DuneVolumeData[]> {
+async function fetchDuneHistoricalVolume(bonkfunTokenMints?: Set<string>): Promise<DuneVolumeData[]> {
   const duneApiKey = process.env.DUNE_API_KEY
 
   if (!duneApiKey) {
@@ -164,105 +164,117 @@ async function fetchDuneHistoricalVolume(bonkfunPools?: Set<string>): Promise<Du
     return []
   }
 
-  // Check cache first
-  if (duneDataCache && Date.now() - duneDataCache.timestamp < DUNE_CACHE_TTL) {
-    console.log(`[Dune] Using cached data (${duneDataCache.data.length} entries)`)
-    return duneDataCache.data
-  }
+  let rows: DuneRawRow[] = []
 
-  try {
-    console.log("[Dune] Fetching historical volume data...")
-    const response = await fetch(
-      `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=10000`,
-      {
-        headers: {
-          "x-dune-api-key": duneApiKey,
-        },
-      }
-    )
-
-    if (!response.ok) {
-      console.error(`[Dune] API error: ${response.status}`)
-      return duneDataCache?.data || []
-    }
-
-    const json = await response.json()
-    const rows: DuneRawRow[] = json.result?.rows || []
-
-    console.log(`[Dune] Raw data: ${rows.length} rows`)
-
-    // Log sample row for debugging
-    if (rows.length > 0) {
-      console.log(`[Dune] Sample row keys: ${Object.keys(rows[0]).join(', ')}`)
-      console.log(`[Dune] Sample row: ${JSON.stringify(rows[0])}`)
-    }
-
-    // Check if data has token_mint or pool_address field (per-token/pool query)
-    const hasTokenData = rows.length > 0 && (rows[0].token_mint || rows[0].pool_address)
-
-    let data: DuneVolumeData[]
-
-    if (hasTokenData && bonkfunPools && bonkfunPools.size > 0) {
-      // Filter by BONK.fun token mints and aggregate by date
-      console.log(`[Dune] Filtering by ${bonkfunPools.size} BONK.fun tokens...`)
-
-      const dateAggregates = new Map<string, { volume: number; trades: number }>()
-      let matchedRows = 0
-      const unmatchedTokens = new Set<string>()
-      const matchedTokens = new Set<string>()
-
-      rows.forEach((row) => {
-        // Try token_mint first, then fall back to pool_address
-        const identifier = (row.token_mint || row.pool_address || "").toLowerCase()
-
-        // Only include tokens that are in our BONK.fun token list
-        if (bonkfunPools.has(identifier)) {
-          matchedRows++
-          matchedTokens.add(identifier)
-          const existing = dateAggregates.get(row.date) || { volume: 0, trades: 0 }
-          existing.volume += Number(row.daily_volume_usd) || 0
-          existing.trades += Number(row.trade_count) || 0
-          dateAggregates.set(row.date, existing)
-        } else {
-          unmatchedTokens.add(identifier)
+  // Check RAW data cache first
+  if (duneRawDataCache && Date.now() - duneRawDataCache.timestamp < DUNE_CACHE_TTL) {
+    console.log(`[Dune] Using cached raw data (${duneRawDataCache.rows.length} rows)`)
+    rows = duneRawDataCache.rows
+  } else {
+    // Fetch fresh raw data from Dune
+    try {
+      console.log("[Dune] Fetching historical volume data...")
+      const response = await fetch(
+        `${DUNE_API}/query/${DUNE_QUERY_ID}/results?limit=10000`,
+        {
+          headers: {
+            "x-dune-api-key": duneApiKey,
+          },
         }
-      })
+      )
 
-      data = Array.from(dateAggregates.entries()).map(([date, agg]) => ({
-        date,
-        trade_count: agg.trades,
-        daily_volume_usd: agg.volume,
-      }))
+      if (!response.ok) {
+        console.error(`[Dune] API error: ${response.status}`)
+        rows = duneRawDataCache?.rows || []
+      } else {
+        const json = await response.json()
+        rows = json.result?.rows || []
 
-      console.log(`[Dune] Matched ${matchedRows} rows from ${matchedTokens.size} unique tokens -> ${data.length} days`)
-      console.log(`[Dune] Unmatched: ${unmatchedTokens.size} unique tokens`)
-      if (matchedTokens.size > 0) {
-        console.log(`[Dune] Sample matched: ${Array.from(matchedTokens).slice(0, 3).join(', ')}`)
+        // Cache raw data
+        duneRawDataCache = { rows, timestamp: Date.now() }
+        console.log(`[Dune] Cached ${rows.length} raw rows`)
       }
-      if (unmatchedTokens.size > 0 && matchedTokens.size === 0) {
-        console.log(`[Dune] Sample unmatched: ${Array.from(unmatchedTokens).slice(0, 5).join(', ')}`)
-      }
-    } else {
-      // No token filtering available - use data as-is (aggregated format)
-      // This fallback handles the old query format
-      console.log("[Dune] Using aggregated data (no token filtering available)")
+    } catch (error) {
+      console.error("[Dune] Error fetching data:", error)
+      rows = duneRawDataCache?.rows || []
+    }
+  }
 
-      data = rows.map((row) => ({
-        date: row.date,
-        trade_count: Number(row.trade_count) || 0,
-        daily_volume_usd: Number(row.daily_volume_usd) || 0,
-      }))
+  if (rows.length === 0) {
+    return []
+  }
+
+  // Log sample row for debugging
+  console.log(`[Dune] Processing ${rows.length} rows`)
+  console.log(`[Dune] Sample row keys: ${Object.keys(rows[0]).join(', ')}`)
+  console.log(`[Dune] Sample row: ${JSON.stringify(rows[0])}`)
+
+  // Check if data has token_mint or pool_address field (per-token/pool query)
+  const hasTokenData = rows[0].token_mint || rows[0].pool_address
+
+  let data: DuneVolumeData[]
+
+  if (hasTokenData && bonkfunTokenMints && bonkfunTokenMints.size > 0) {
+    // Filter by BONK.fun token mints and aggregate by date
+    console.log(`[Dune] Filtering by ${bonkfunTokenMints.size} BONK.fun tokens...`)
+
+    const dateAggregates = new Map<string, { volume: number; trades: number }>()
+    let matchedRows = 0
+    const unmatchedTokens = new Set<string>()
+    const matchedTokens = new Set<string>()
+
+    rows.forEach((row) => {
+      // Try token_mint first, then fall back to pool_address
+      const identifier = (row.token_mint || row.pool_address || "").toLowerCase()
+
+      // Only include tokens that are in our BONK.fun token list
+      if (bonkfunTokenMints.has(identifier)) {
+        matchedRows++
+        matchedTokens.add(identifier)
+        const existing = dateAggregates.get(row.date) || { volume: 0, trades: 0 }
+        existing.volume += Number(row.daily_volume_usd) || 0
+        existing.trades += Number(row.trade_count) || 0
+        dateAggregates.set(row.date, existing)
+      } else {
+        unmatchedTokens.add(identifier)
+      }
+    })
+
+    data = Array.from(dateAggregates.entries()).map(([date, agg]) => ({
+      date,
+      trade_count: agg.trades,
+      daily_volume_usd: agg.volume,
+    }))
+
+    console.log(`[Dune] Matched ${matchedRows} rows from ${matchedTokens.size} unique tokens -> ${data.length} days`)
+    console.log(`[Dune] Unmatched: ${unmatchedTokens.size} unique tokens`)
+
+    // Enhanced debugging: show sample comparison
+    if (matchedTokens.size === 0 && unmatchedTokens.size > 0) {
+      const sampleUnmatched = Array.from(unmatchedTokens).slice(0, 3)
+      const sampleFromRaydium = Array.from(bonkfunTokenMints).slice(0, 3)
+      console.log(`[Dune] DEBUG - Sample Dune tokens: ${sampleUnmatched.join(', ')}`)
+      console.log(`[Dune] DEBUG - Sample Raydium tokens: ${sampleFromRaydium.join(', ')}`)
+    } else if (matchedTokens.size > 0) {
+      console.log(`[Dune] Sample matched: ${Array.from(matchedTokens).slice(0, 3).join(', ')}`)
+    }
+  } else {
+    // No token filtering available - use data as-is (aggregated format)
+    // This fallback handles the old query format
+    console.log("[Dune] Using aggregated data (no token filtering available)")
+    if (!hasTokenData) {
+      console.log("[Dune] HINT: Update your Dune query to include 'token_mint' field for BONK.fun filtering")
     }
 
-    // Update cache
-    duneDataCache = { data, timestamp: Date.now() }
-    console.log(`[Dune] Cached ${data.length} days of historical data`)
-
-    return data
-  } catch (error) {
-    console.error("[Dune] Error fetching data:", error)
-    return duneDataCache?.data || []
+    data = rows.map((row) => ({
+      date: row.date,
+      trade_count: Number(row.trade_count) || 0,
+      daily_volume_usd: Number(row.daily_volume_usd) || 0,
+    }))
   }
+
+  console.log(`[Dune] Returning ${data.length} days of volume data`)
+  return data
 }
 
 /**
