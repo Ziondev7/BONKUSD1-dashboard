@@ -56,7 +56,7 @@ interface DuneResultsResponse {
 }
 
 /**
- * Execute the saved Dune query
+ * Execute the saved Dune query by ID
  */
 async function executeQuery(queryId: number): Promise<string> {
   const duneApiKey = process.env.DUNE_API_KEY
