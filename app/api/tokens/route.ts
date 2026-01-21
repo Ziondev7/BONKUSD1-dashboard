@@ -20,16 +20,40 @@ const CONFIG = {
 // ============================================
 // IN-MEMORY CACHE WITH STALE-WHILE-REVALIDATE
 // ============================================
-interface CacheEntry {
-  data: any[]
-  timestamp: number
-  isRefreshing: boolean
+
+// Cache entry is an immutable snapshot - replaced atomically
+interface CacheSnapshot {
+  readonly data: any[]
+  readonly timestamp: number
 }
 
-let cache: CacheEntry = {
-  data: [],
-  timestamp: 0,
+// Mutable state for cache management
+interface CacheState {
+  // Current cache snapshot - replaced atomically to prevent race conditions
+  snapshot: CacheSnapshot
+  // Flag to prevent concurrent refreshes
+  isRefreshing: boolean
+  // Promise for in-flight refresh (allows waiting for same refresh)
+  refreshPromise: Promise<void> | null
+}
+
+// CRITICAL: Cache snapshot is replaced atomically as a single object
+// This prevents race conditions where data and timestamp could be inconsistent
+let cacheState: CacheState = {
+  snapshot: { data: [], timestamp: 0 },
   isRefreshing: false,
+  refreshPromise: null,
+}
+
+// Helper to get current cache snapshot atomically
+function getCacheSnapshot(): CacheSnapshot {
+  return cacheState.snapshot
+}
+
+// Helper to set cache atomically - creates new immutable snapshot
+function setCacheSnapshot(data: any[], timestamp: number): void {
+  // Create new snapshot object (immutable pattern for atomic update)
+  cacheState.snapshot = Object.freeze({ data, timestamp })
 }
 
 // BonkFun whitelist is now managed by lib/bonkfun-verification.ts
@@ -687,20 +711,30 @@ async function fetchAllTokens(): Promise<any[]> {
   return tokens
 }
 
-// Background refresh function
-async function refreshCache() {
-  if (cache.isRefreshing) return
-  
-  cache.isRefreshing = true
-  try {
-    const tokens = await fetchAllTokens()
-    if (tokens.length > 0) {
-      cache.data = tokens
-      cache.timestamp = Date.now()
-    }
-  } finally {
-    cache.isRefreshing = false
+// Background refresh function with proper mutex and atomic updates
+async function refreshCache(): Promise<void> {
+  // If already refreshing, return the existing promise to avoid duplicate work
+  if (cacheState.isRefreshing && cacheState.refreshPromise) {
+    return cacheState.refreshPromise
   }
+
+  // Create the refresh promise
+  const doRefresh = async () => {
+    try {
+      const tokens = await fetchAllTokens()
+      if (tokens.length > 0) {
+        // ATOMIC UPDATE: Replace entire snapshot at once
+        setCacheSnapshot(tokens, Date.now())
+      }
+    } finally {
+      cacheState.isRefreshing = false
+      cacheState.refreshPromise = null
+    }
+  }
+
+  cacheState.isRefreshing = true
+  cacheState.refreshPromise = doRefresh()
+  return cacheState.refreshPromise
 }
 
 // ============================================
@@ -712,7 +746,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const forceRefresh = url.searchParams.get("force") === "true"
 
-  // Check if we have valid cached data
+  // Get current cache snapshot atomically
+  const cache = getCacheSnapshot()
   const cacheAge = now - cache.timestamp
   const hasCache = cache.data.length > 0
   const isFresh = cacheAge < CONFIG.CACHE_TTL
@@ -735,9 +770,9 @@ export async function GET(request: Request) {
 
   // Return stale cache while triggering background refresh
   if (hasCache && isStale && !forceRefresh) {
-    // Trigger background refresh
+    // Trigger background refresh (non-blocking)
     refreshCache()
-    
+
     return NextResponse.json({
       tokens: cache.data,
       cached: true,
@@ -755,16 +790,11 @@ export async function GET(request: Request) {
   // Need fresh data
   try {
     const tokens = await fetchAllTokens()
-    
+
     if (tokens.length > 0) {
-      cache.data = tokens
-      cache.timestamp = now
-      
-      // Record volume snapshot for history
-      const totalVolume = tokens.reduce((sum, t) => sum + (t.volume24h || 0), 0)
-      const totalLiquidity = tokens.reduce((sum, t) => sum + (t.liquidity || 0), 0)
-      const totalMcap = tokens.reduce((sum, t) => sum + (t.mcap || 0), 0)
-      
+      // ATOMIC UPDATE: Replace entire cache snapshot at once
+      setCacheSnapshot(tokens, now)
+
       return NextResponse.json({
         tokens,
         cached: false,
@@ -777,12 +807,13 @@ export async function GET(request: Request) {
       })
     }
 
-    // Return cached data if available
-    if (hasCache) {
+    // Return cached data if available (re-read in case it was updated)
+    const latestCache = getCacheSnapshot()
+    if (latestCache.data.length > 0) {
       return NextResponse.json({
-        tokens: cache.data,
+        tokens: latestCache.data,
         cached: true,
-        timestamp: cache.timestamp,
+        timestamp: latestCache.timestamp,
         error: "Using cached data - fresh fetch returned empty",
         health: {
           raydium: apiHealth.raydium.healthy,
@@ -800,12 +831,14 @@ export async function GET(request: Request) {
     })
   } catch (error) {
     console.error("[API] Fatal error:", error)
-    
-    if (hasCache) {
+
+    // Re-read cache in case it was updated during our fetch
+    const latestCache = getCacheSnapshot()
+    if (latestCache.data.length > 0) {
       return NextResponse.json({
-        tokens: cache.data,
+        tokens: latestCache.data,
         cached: true,
-        timestamp: cache.timestamp,
+        timestamp: latestCache.timestamp,
         error: "Using cached data due to error",
       })
     }
