@@ -245,22 +245,19 @@ export async function verifyPoolsViaBonkFun(
     return verified
   }
 
-  console.log(`[BonkFun] Verifying ${pools.length} pools via Helius...`)
+  // Filter out pools without valid pool addresses
+  const validPools = pools.filter((p) => p.poolAddress && p.poolAddress.length > 30)
 
-  // First, filter by pool type (CPMM pools are likely BonkFun graduated)
-  const cpmmPools = pools.filter((p) => {
-    const poolType = (p.poolType || "").toLowerCase()
-    return poolType.includes("cpmm") || poolType.includes("launchlab")
-  })
-
-  console.log(`[BonkFun] ${cpmmPools.length} CPMM/LaunchLab pools to verify`)
+  console.log(`[BonkFun] Verifying ${validPools.length} pools via Helius (from ${pools.length} total)...`)
 
   // Batch check pools (with rate limiting)
-  const BATCH_SIZE = 10
-  const DELAY_MS = 100 // 100ms between batches to respect rate limits
+  // Helius free tier: 10 RPS, so we process 5 pools per batch with 1s delay
+  // (each pool may need 2 API calls: token origin + pool origin)
+  const BATCH_SIZE = 5
+  const DELAY_MS = 1000 // 1s between batches to stay within free tier limits
 
-  for (let i = 0; i < cpmmPools.length; i += BATCH_SIZE) {
-    const batch = cpmmPools.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < validPools.length; i += BATCH_SIZE) {
+    const batch = validPools.slice(i, i + BATCH_SIZE)
 
     const results = await Promise.all(
       batch.map(async (pool) => {
@@ -270,15 +267,22 @@ export async function verifyPoolsViaBonkFun(
           return { mint: pool.mint, isBonkFun: cached.result.isBonkFun }
         }
 
-        // Check pool origin
-        const isBonkFun = await checkPoolOriginViaHelius(pool.poolAddress)
+        // Check TOKEN MINT origin AND pool origin in PARALLEL
+        // Token: Looks for BonkFun's LaunchLab program with platform config
+        // Pool: Looks for BonkFun graduation program involvement
+        const [tokenResult, poolResult] = await Promise.all([
+          checkTokenOriginViaHelius(pool.mint),
+          pool.poolAddress ? checkPoolOriginViaHelius(pool.poolAddress) : Promise.resolve(false),
+        ])
+
+        const isBonkFun = tokenResult.isBonkFun || poolResult
 
         // Cache result
         verificationCache.set(pool.mint, {
           result: {
             isBonkFun,
             confidence: isBonkFun ? "high" : "medium",
-            source: "pool-authority",
+            source: tokenResult.isBonkFun ? tokenResult.source : "pool-authority",
           },
           timestamp: Date.now(),
         })
@@ -294,12 +298,17 @@ export async function verifyPoolsViaBonkFun(
     }
 
     // Rate limit delay
-    if (i + BATCH_SIZE < cpmmPools.length) {
+    if (i + BATCH_SIZE < validPools.length) {
       await new Promise((resolve) => setTimeout(resolve, DELAY_MS))
+    }
+
+    // Progress log every 50 pools
+    if ((i + BATCH_SIZE) % 50 === 0 || i + BATCH_SIZE >= validPools.length) {
+      console.log(`[BonkFun] Progress: ${Math.min(i + BATCH_SIZE, validPools.length)}/${validPools.length} pools checked, ${verified.size} verified`)
     }
   }
 
-  console.log(`[BonkFun] Verified ${verified.size}/${cpmmPools.length} as genuine BonkFun tokens`)
+  console.log(`[BonkFun] Verified ${verified.size}/${validPools.length} as genuine BonkFun tokens`)
 
   // Update whitelist cache
   tokenListCache = {
