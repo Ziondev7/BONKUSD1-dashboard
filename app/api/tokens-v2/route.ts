@@ -87,6 +87,14 @@ function shouldExclude(symbol?: string, name?: string): boolean {
   )
 }
 
+/**
+ * Check if address is a fake BonkFun token
+ * Real BonkFun tokens don't end with "USA" - those are from a different launchpad
+ */
+function isFakeBonkFunToken(address: string): boolean {
+  return address.endsWith("USA")
+}
+
 async function fetchWithTimeout(url: string, timeout = 8000): Promise<Response> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeout)
@@ -447,9 +455,12 @@ async function fetchRaydiumPoolsFallback(): Promise<string[]> {
         if (!baseMint || baseMint === CONFIG.USD1_MINT) continue
 
         // Check for CPMM/LaunchLab pool types (BonkFun tokens)
+        // Exclude tokens ending with "USA" - those are from a different launchpad
         const poolType = (pool.type || pool.poolType || "").toLowerCase()
         if (poolType.includes("cpmm") || poolType.includes("launch") || poolType === "standard") {
-          tokenMints.add(baseMint)
+          if (!baseMint.endsWith("USA")) {
+            tokenMints.add(baseMint)
+          }
         }
       }
 
@@ -545,6 +556,9 @@ async function fetchAllTokensV2(): Promise<any[]> {
   let id = 0
 
   for (const mint of tokenMints) {
+    // Skip fake BonkFun tokens (addresses ending with USA)
+    if (isFakeBonkFunToken(mint)) continue
+
     const dexData = dexScreenerData.get(mint)
     const gData = geckoData.get(mint)
 
