@@ -421,14 +421,9 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
       // Use whitelist to only include verified BonkFun tokens
       if (useWhitelist) {
         if (!bonkfunTokens.has(pairedMint)) return
-      } else {
-        // Fallback: filter by pool type when Dune whitelist unavailable
-        // BonkFun tokens use CPMM/LaunchLab pools
-        const poolType = (pool.type || pool.poolType || "").toLowerCase()
-        if (!poolType.includes("cpmm") && !poolType.includes("launch")) {
-          return
-        }
       }
+      // Note: When whitelist unavailable, we include all USD1 pools (minus USA tokens)
+      // The USA token filter above already excludes non-BonkFun launchpad tokens
 
       const volume24h = pool.day?.volume || 0
       const liquidity = pool.tvl || 0
