@@ -473,7 +473,8 @@ async function fetchAllTokensV2(): Promise<any[]> {
   let discoverySource = "cache"
   let tokenMints: string[] = []
 
-  if (!poolData) {
+  // Don't use cache if it's empty (bad cache from failed discovery)
+  if (!poolData || poolData.tokenMints.length === 0) {
     console.log("[API-v2] Cache miss - discovering pools on-chain...")
     try {
       const discovery = await discoverUSD1Pools()
@@ -495,8 +496,11 @@ async function fetchAllTokensV2(): Promise<any[]> {
         tokenMints = await fetchRaydiumPoolsFallback()
         discoverySource = "raydium-api"
 
+        // Only cache if we found tokens
         if (tokenMints.length > 0) {
           await setCachedPools([], tokenMints)
+        } else {
+          console.warn("[API-v2] Raydium fallback also returned 0 tokens!")
         }
       }
     } catch (e) {
