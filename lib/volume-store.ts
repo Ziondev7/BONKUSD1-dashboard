@@ -54,6 +54,107 @@ interface KVClient {
   get: (key: string) => Promise<unknown | null>
 }
 
+// ============================================
+// STORAGE STATUS TRACKING
+// ============================================
+// Tracks whether KV is working or if we've fallen back to memory
+// This is important for production monitoring - silent fallback to memory
+// means historical data will be lost on redeployment
+
+export interface StorageHealth {
+  mode: "vercel-kv" | "memory" | "degraded"
+  kvConfigured: boolean
+  kvConnected: boolean
+  kvLastError: string | null
+  kvLastErrorTime: number | null
+  kvErrorCount: number
+  memorySnapshotCount: number
+  memoryDailyVolumeCount: number
+  isPersistent: boolean
+  warning: string | null
+}
+
+const storageHealth: {
+  kvLastError: string | null
+  kvLastErrorTime: number | null
+  kvErrorCount: number
+  kvLastSuccess: number | null
+} = {
+  kvLastError: null,
+  kvLastErrorTime: null,
+  kvErrorCount: 0,
+  kvLastSuccess: null,
+}
+
+function recordKVError(error: unknown): void {
+  storageHealth.kvErrorCount++
+  storageHealth.kvLastError = error instanceof Error ? error.message : String(error)
+  storageHealth.kvLastErrorTime = Date.now()
+
+  // CRITICAL: Log warning when falling back to memory in production
+  const isProduction = process.env.NODE_ENV === "production"
+  if (isProduction) {
+    console.error(
+      "[VolumeStore] CRITICAL: KV storage failed, falling back to volatile in-memory storage. " +
+      "Historical data will be LOST on redeployment! Error:",
+      storageHealth.kvLastError
+    )
+  } else {
+    console.warn("[VolumeStore] KV error, using in-memory fallback:", storageHealth.kvLastError)
+  }
+}
+
+function recordKVSuccess(): void {
+  storageHealth.kvLastSuccess = Date.now()
+  // Reset error count on success (but keep last error for debugging)
+  storageHealth.kvErrorCount = 0
+}
+
+/**
+ * Get comprehensive storage health status for monitoring/debugging
+ */
+export function getStorageHealth(): StorageHealth {
+  const kvConfigured = !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
+  const kvConnected = kvConfigured && storageHealth.kvErrorCount === 0 && storageHealth.kvLastSuccess !== null
+
+  let mode: "vercel-kv" | "memory" | "degraded"
+  let warning: string | null = null
+
+  if (kvConfigured && kvConnected) {
+    mode = "vercel-kv"
+  } else if (kvConfigured && !kvConnected) {
+    mode = "degraded"
+    warning = storageHealth.kvLastError
+      ? `KV storage failed: ${storageHealth.kvLastError}. Using volatile memory fallback.`
+      : "KV storage not yet connected. Data may be volatile."
+  } else {
+    mode = "memory"
+    if (process.env.NODE_ENV === "production") {
+      warning = "KV not configured. Using volatile in-memory storage. Historical data will be lost on redeployment."
+    }
+  }
+
+  return {
+    mode,
+    kvConfigured,
+    kvConnected,
+    kvLastError: storageHealth.kvLastError,
+    kvLastErrorTime: storageHealth.kvLastErrorTime,
+    kvErrorCount: storageHealth.kvErrorCount,
+    memorySnapshotCount: memoryStore.length,
+    memoryDailyVolumeCount: dailyVolumeMemoryStore.length,
+    isPersistent: mode === "vercel-kv",
+    warning,
+  }
+}
+
+/**
+ * Check if storage is in a healthy persistent state
+ */
+export function isStoragePersistent(): boolean {
+  return getStorageHealth().isPersistent
+}
+
 /**
  * Dynamically load Vercel KV if available
  */
@@ -67,10 +168,13 @@ async function getKV(): Promise<KVClient | null> {
     const module = await import("@vercel/kv")
     return module.kv as KVClient
   } catch (e) {
-    console.error("[VolumeStore] Failed to load @vercel/kv:", e)
+    recordKVError(e)
     return null
   }
 }
+
+// In-memory fallback for daily volume data (moved up for StorageHealth access)
+const dailyVolumeMemoryStore: DailyVolumeData[] = []
 
 /**
  * Get all volume snapshots for a time period
@@ -94,7 +198,7 @@ export async function getVolumeSnapshots(
       }
       return []
     } catch (error) {
-      console.error("[VolumeStore] KV error, falling back to memory:", error)
+      recordKVError(error)
     }
   }
 
@@ -135,9 +239,10 @@ export async function saveVolumeSnapshot(snapshot: VolumeSnapshot): Promise<void
         await kv.zremrangebyrank("volume:snapshots", 0, count - config.maxSnapshots - 1)
       }
 
+      recordKVSuccess()
       return
     } catch (error) {
-      console.error("[VolumeStore] KV save error, falling back to memory:", error)
+      recordKVError(error)
     }
   }
 
@@ -178,9 +283,10 @@ export async function getLatestSnapshot(): Promise<VolumeSnapshot | null> {
         const parsed = typeof snapshots[0] === "string" ? JSON.parse(snapshots[0]) : snapshots[0]
         return parsed as VolumeSnapshot
       }
+      recordKVSuccess()
       return null
     } catch (error) {
-      console.error("[VolumeStore] KV error, falling back to memory:", error)
+      recordKVError(error)
     }
   }
 
@@ -292,8 +398,7 @@ export async function getStorageStatus(): Promise<{
 // DAILY VOLUME STORAGE (Persistent Historical Data)
 // ============================================
 
-// In-memory fallback for daily volume data
-const dailyVolumeMemoryStore: DailyVolumeData[] = []
+// Note: dailyVolumeMemoryStore is declared earlier near storageHealth for access in getStorageHealth()
 
 const DAILY_VOLUME_KEY = "volume:daily"
 
@@ -320,9 +425,10 @@ export async function saveDailyVolume(data: DailyVolumeData): Promise<boolean> {
         dates.sort()
         await kv.set(`${DAILY_VOLUME_KEY}:index`, JSON.stringify(dates))
       }
+      recordKVSuccess()
       return true
     } catch (error) {
-      console.error("[VolumeStore] KV error saving daily volume:", error)
+      recordKVError(error)
     }
   }
 
@@ -441,9 +547,10 @@ export async function getDailyVolume(
           }
         }
       }
+      recordKVSuccess()
       return results.sort((a, b) => a.timestamp - b.timestamp)
     } catch (error) {
-      console.error("[VolumeStore] KV error fetching daily volume:", error)
+      recordKVError(error)
     }
   }
 
@@ -476,9 +583,10 @@ export async function getAllDailyVolume(): Promise<DailyVolumeData[]> {
           results.push(data as DailyVolumeData)
         }
       }
+      recordKVSuccess()
       return results.sort((a, b) => a.timestamp - b.timestamp)
     } catch (error) {
-      console.error("[VolumeStore] KV error fetching all daily volume:", error)
+      recordKVError(error)
     }
   }
 
@@ -504,11 +612,13 @@ export async function getLatestDailyVolume(): Promise<DailyVolumeData | null> {
       const latestDate = dates[dates.length - 1]
       const dataJson = await kv.get(`${DAILY_VOLUME_KEY}:${latestDate}`)
       if (dataJson) {
+        recordKVSuccess()
         return (typeof dataJson === "string" ? JSON.parse(dataJson) : dataJson) as DailyVolumeData
       }
+      recordKVSuccess()
       return null
     } catch (error) {
-      console.error("[VolumeStore] KV error fetching latest daily volume:", error)
+      recordKVError(error)
     }
   }
 

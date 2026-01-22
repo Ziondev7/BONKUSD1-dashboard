@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash(npm:*)",
+      "Bash(git:*)",
+      "Bash(curl:*)"
+    ]
+  },
+  "env": {
+    "HELIUS_API_KEY": "${HELIUS_API_KEY}",
+    "KV_REST_API_URL": "${KV_REST_API_URL}",
+    "KV_REST_API_TOKEN": "${KV_REST_API_TOKEN}"
+  }
+}

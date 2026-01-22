@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { parsePrice as parsePrecisePrice, formatSubscriptPrice } from "./decimal"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -26,15 +27,42 @@ export function formatCompactNumber(num: number): string {
   return num.toFixed(0)
 }
 
+/**
+ * Format a price for display with appropriate precision.
+ * Uses subscript notation for very small prices (DeFi standard).
+ * Example: 0.000001234 becomes $0.0₆1234
+ */
 export function formatPrice(price: number | string | undefined): string {
   if (price === undefined || price === null) return "$0"
-  const p = typeof price === "string" ? Number.parseFloat(price) : price
-  if (isNaN(p)) return "$0"
-  if (p < 0.00000001) return `$${p.toExponential(2)}`
-  if (p < 0.0001) return `$${p.toFixed(8)}`
-  if (p < 0.01) return `$${p.toFixed(6)}`
-  if (p < 1) return `$${p.toFixed(4)}`
-  if (p < 1000) return `$${p.toFixed(2)}`
+
+  // Use precision-aware parsing
+  const parsed = parsePrecisePrice(price)
+  const p = parsed.value
+
+  if (p === 0 || isNaN(p)) return "$0"
+
+  // Very small prices - use subscript notation for zeros
+  // This is the DeFi standard for displaying micro-cap token prices
+  if (p < 0.0001 && p > 0) {
+    return formatSubscriptPrice(p)
+  }
+
+  // Small prices (< $0.01)
+  if (p < 0.01) {
+    return `$${p.toFixed(6)}`
+  }
+
+  // Medium prices ($0.01 - $1)
+  if (p < 1) {
+    return `$${p.toFixed(4)}`
+  }
+
+  // Normal prices ($1 - $1000)
+  if (p < 1000) {
+    return `$${p.toFixed(2)}`
+  }
+
+  // Large prices
   return `$${p.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 }
 
@@ -221,32 +249,30 @@ export function safeParseNumber(value: unknown, fallback = 0): number {
 }
 
 /**
- * Safely parse price with high precision handling for small memecoin prices
- * Prevents precision loss for very small numbers
+ * Safely parse price with high precision handling for small memecoin prices.
+ * Uses the precision-aware decimal module for accurate parsing.
  */
 export function safeParsePrice(value: unknown, fallback = 0): number {
   if (value === null || value === undefined) return fallback
-  if (typeof value === 'number') {
-    return isNaN(value) || !isFinite(value) ? fallback : value
+
+  const parsed = parsePrecisePrice(value)
+
+  if (parsed.value === 0 && fallback !== 0) {
+    return fallback
   }
-  if (typeof value === 'string') {
-    // Handle scientific notation
-    if (value.includes('e') || value.includes('E')) {
-      const parsed = parseFloat(value)
-      return isNaN(parsed) || !isFinite(parsed) ? fallback : parsed
-    }
-    // For very high precision decimals, limit to 15 significant digits
-    const parts = value.split('.')
-    if (parts[1]?.length > 15) {
-      const truncated = parts[0] + '.' + parts[1].slice(0, 15)
-      const parsed = parseFloat(truncated)
-      return isNaN(parsed) || !isFinite(parsed) ? fallback : parsed
-    }
-    const parsed = parseFloat(value)
-    return isNaN(parsed) || !isFinite(parsed) ? fallback : parsed
+
+  // Log warning for precision loss (only in development)
+  if (parsed.precisionLost && parsed.value > 0 && process.env.NODE_ENV === "development") {
+    console.warn(
+      `[safeParsePrice] Precision loss detected: ${parsed.raw} has ${parsed.decimals} decimals`
+    )
   }
-  return fallback
+
+  return parsed.value
 }
+
+// Re-export useful decimal functions for direct use
+export { formatSubscriptPrice } from "./decimal"
 
 /**
  * Validate price sources and detect discrepancies
