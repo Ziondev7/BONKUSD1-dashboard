@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/volume-snapshot",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/discover-tokens",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

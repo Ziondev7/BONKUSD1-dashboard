@@ -30,7 +30,7 @@ export const BONKFUN_PROGRAMS = {
 const WHITELIST_CACHE_TTL = 30 * 60 * 1000 // 30 minutes for in-memory cache
 const VERIFICATION_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours - token origin never changes
 const KV_CACHE_KEY = "bonkfun:verified_tokens"
-const KV_CACHE_TTL = 7 * 24 * 60 * 60 // 7 days in seconds for KV
+const KV_CACHE_TTL = 24 * 60 * 60 // 24 hours in seconds for KV (reduced from 7 days)
 
 // Rate limiting - VERY conservative to avoid 429 errors
 const RATE_LIMIT_DELAY_MS = 500 // 500ms between each API call (2 RPS max)
@@ -44,6 +44,21 @@ interface VerificationResult {
   isBonkFun: boolean
   confidence: "high" | "medium" | "low"
   source: "helius-history" | "program-check" | "pool-authority" | "cache" | "kv-cache" | "unknown"
+}
+
+// Three-state verification outcome to handle inconclusive results properly
+type VerificationOutcome =
+  | { status: 'verified'; isBonkFun: true; confidence: 'high' | 'medium' }
+  | { status: 'verified'; isBonkFun: false }
+  | { status: 'inconclusive'; reason: 'rate_limited' | 'api_error' | 'timeout' | 'no_pool_address' | 'invalid_input' }
+
+// Pending retry entry for tokens with inconclusive verification
+interface PendingRetryEntry {
+  mint: string
+  poolAddress: string
+  attempts: number
+  lastAttempt: number
+  reason: string
 }
 
 interface TokenListCache {
@@ -99,6 +114,11 @@ const verificationCache = new Map<string, { result: VerificationResult; timestam
 // Track if verification is already in progress to prevent concurrent runs
 let verificationInProgress = false
 let verificationPromise: Promise<Set<string>> | null = null
+
+// Queue of tokens with inconclusive verification results for retry
+const pendingRetry = new Map<string, PendingRetryEntry>()
+const MAX_RETRY_ATTEMPTS = 5
+const RETRY_BACKOFF_BASE_MS = 60000 // 1 minute base
 
 // ============================================
 // VERCEL KV HELPERS
@@ -232,8 +252,213 @@ async function checkTokenOriginViaHelius(mintAddress: string): Promise<Verificat
 }
 
 /**
+ * Fallback verification: Check if a token MINT was created via BonkFun.
+ * Used when pool address is unavailable or pool verification fails.
+ * Returns VerificationOutcome with proper three-state handling.
+ */
+async function checkTokenMintOriginViaHelius(mintAddress: string): Promise<VerificationOutcome> {
+  const heliusApiKey = process.env.HELIUS_API_KEY
+  if (!heliusApiKey) {
+    return { status: 'inconclusive', reason: 'api_error' }
+  }
+
+  if (!mintAddress || mintAddress.length < 30) {
+    return { status: 'inconclusive', reason: 'invalid_input' }
+  }
+
+  try {
+    // Get transactions for this token mint
+    const signaturesUrl = `https://api.helius.xyz/v0/addresses/${mintAddress}/transactions?api-key=${heliusApiKey}&limit=10`
+
+    const response = await fetch(signaturesUrl, {
+      headers: { Accept: "application/json" },
+    })
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return { status: 'inconclusive', reason: 'rate_limited' }
+      }
+      return { status: 'inconclusive', reason: 'api_error' }
+    }
+
+    const transactions: HeliusParsedTransaction[] = await response.json()
+
+    for (const tx of transactions) {
+      if (!tx.instructions) continue
+
+      for (const ix of tx.instructions) {
+        // Check for LaunchLab program with BonkFun platform config
+        if (ix.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM) {
+          if (ix.accounts?.includes(BONKFUN_PROGRAMS.PLATFORM_CONFIG)) {
+            return { status: 'verified', isBonkFun: true, confidence: 'high' }
+          }
+          // LaunchLab without platform config - could be from different platform
+          return { status: 'verified', isBonkFun: true, confidence: 'medium' }
+        }
+
+        // Check for graduate program involvement
+        if (ix.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM) {
+          return { status: 'verified', isBonkFun: true, confidence: 'high' }
+        }
+
+        // Check inner instructions
+        if (ix.innerInstructions) {
+          for (const inner of ix.innerInstructions) {
+            if (
+              inner.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM ||
+              inner.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM
+            ) {
+              return { status: 'verified', isBonkFun: true, confidence: 'medium' }
+            }
+          }
+        }
+      }
+
+      // Also check accountData for program involvement
+      if (tx.accountData) {
+        for (const acc of tx.accountData) {
+          if (
+            acc.account === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+            acc.account === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM ||
+            acc.account === BONKFUN_PROGRAMS.PLATFORM_CONFIG
+          ) {
+            return { status: 'verified', isBonkFun: true, confidence: 'medium' }
+          }
+        }
+      }
+    }
+
+    // No BonkFun programs found - definitively not BonkFun
+    return { status: 'verified', isBonkFun: false }
+  } catch (error) {
+    console.error(`[BonkFun] Error checking mint origin for ${mintAddress.slice(0, 8)}...: ${error}`)
+    return { status: 'inconclusive', reason: 'api_error' }
+  }
+}
+
+/**
  * Check if a Raydium pool was created by BonkFun graduation.
  * This checks the POOL address, not the token mint.
+ * Returns VerificationOutcome with proper three-state handling.
+ */
+async function checkPoolOriginViaHeliusWithOutcome(poolAddress: string): Promise<VerificationOutcome> {
+  const heliusApiKey = process.env.HELIUS_API_KEY
+  if (!heliusApiKey) {
+    return { status: 'inconclusive', reason: 'api_error' }
+  }
+
+  if (!poolAddress || poolAddress.length < 30) {
+    return { status: 'inconclusive', reason: 'no_pool_address' }
+  }
+
+  try {
+    const signaturesUrl = `https://api.helius.xyz/v0/addresses/${poolAddress}/transactions?api-key=${heliusApiKey}&limit=5`
+
+    const response = await fetch(signaturesUrl, {
+      headers: { Accept: "application/json" },
+    })
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return { status: 'inconclusive', reason: 'rate_limited' }
+      }
+      return { status: 'inconclusive', reason: 'api_error' }
+    }
+
+    const transactions: HeliusParsedTransaction[] = await response.json()
+
+    // Check the pool creation transaction for BonkFun involvement
+    for (const tx of transactions) {
+      if (!tx.instructions) continue
+
+      for (const ix of tx.instructions) {
+        // Check if graduate program created this pool
+        if (ix.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM) {
+          return { status: 'verified', isBonkFun: true, confidence: 'high' }
+        }
+
+        // Check if LaunchLab program was involved
+        if (ix.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM) {
+          return { status: 'verified', isBonkFun: true, confidence: 'high' }
+        }
+
+        // Check if CPMM pool was created with BonkFun involvement
+        if (ix.programId === BONKFUN_PROGRAMS.RAYDIUM_CPMM) {
+          if (ix.innerInstructions) {
+            for (const inner of ix.innerInstructions) {
+              if (
+                inner.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+                inner.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM
+              ) {
+                return { status: 'verified', isBonkFun: true, confidence: 'high' }
+              }
+            }
+          }
+        }
+
+        // Check all inner instructions
+        if (ix.innerInstructions) {
+          for (const inner of ix.innerInstructions) {
+            if (
+              inner.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+              inner.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM
+            ) {
+              return { status: 'verified', isBonkFun: true, confidence: 'high' }
+            }
+          }
+        }
+      }
+
+      // Also check accountData for program involvement
+      if (tx.accountData) {
+        for (const acc of tx.accountData) {
+          if (
+            acc.account === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+            acc.account === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM ||
+            acc.account === BONKFUN_PROGRAMS.PLATFORM_CONFIG
+          ) {
+            return { status: 'verified', isBonkFun: true, confidence: 'medium' }
+          }
+        }
+      }
+    }
+
+    // No BonkFun programs found - definitively not BonkFun
+    return { status: 'verified', isBonkFun: false }
+  } catch (error) {
+    console.error(`[BonkFun] Error checking pool origin for ${poolAddress.slice(0, 8)}...: ${error}`)
+    return { status: 'inconclusive', reason: 'api_error' }
+  }
+}
+
+/**
+ * Verify a token using multiple methods in sequence.
+ * Returns as soon as a definitive result is found.
+ * Falls back to token mint verification if pool verification fails.
+ */
+async function verifyTokenWithFallbacks(
+  mint: string,
+  poolAddress?: string
+): Promise<VerificationOutcome> {
+  // Method 1: Check pool origin (preferred - most reliable)
+  if (poolAddress && poolAddress.length >= 30) {
+    const poolResult = await checkPoolOriginViaHeliusWithOutcome(poolAddress)
+    if (poolResult.status === 'verified') {
+      return poolResult
+    }
+    // If inconclusive, try fallback
+    console.log(`[BonkFun] Pool check inconclusive for ${mint.slice(0, 8)}..., trying mint verification`)
+  }
+
+  // Method 2: Check token mint origin (fallback)
+  const mintResult = await checkTokenMintOriginViaHelius(mint)
+  return mintResult
+}
+
+/**
+ * Check if a Raydium pool was created by BonkFun graduation.
+ * This checks the POOL address, not the token mint.
+ * @deprecated Use checkPoolOriginViaHeliusWithOutcome for better error handling
  */
 async function checkPoolOriginViaHelius(poolAddress: string): Promise<boolean> {
   const heliusApiKey = process.env.HELIUS_API_KEY
@@ -354,28 +579,110 @@ async function doVerification(
     return verified
   }
 
-  // Step 1: Try to load from KV cache first
+  // Step 1: Load existing verified tokens from KV cache
   const kvCached = await loadFromKV()
+
   if (kvCached && kvCached.size > 0) {
-    // Use cached data, update in-memory cache
-    tokenListCache = {
-      tokens: kvCached,
-      timestamp: Date.now(),
-      source: "kv",
+    // Add all cached tokens to verified set
+    kvCached.forEach(mint => verified.add(mint))
+
+    // Step 2: Identify NEW tokens not in cache
+    const newPools = pools.filter(p =>
+      p.mint &&
+      p.mint.length > 30 &&
+      !kvCached.has(p.mint)
+    )
+
+    if (newPools.length === 0) {
+      console.log(`[BonkFun] Using ${kvCached.size} tokens from KV cache, no new tokens to verify`)
+      tokenListCache = {
+        tokens: kvCached,
+        timestamp: Date.now(),
+        source: "kv",
+      }
+      return verified
     }
-    console.log(`[BonkFun] Using ${kvCached.size} tokens from KV cache`)
-    return kvCached
+
+    console.log(`[BonkFun] Found ${newPools.length} new tokens to verify (${kvCached.size} already cached)`)
+
+    // Step 3: Verify only new tokens with fallback support
+    let newVerifiedCount = 0
+    let inconclusiveCount = 0
+
+    for (let i = 0; i < newPools.length; i++) {
+      const pool = newPools[i]
+
+      // Check in-memory cache first
+      const cached = verificationCache.get(pool.mint)
+      if (cached && Date.now() - cached.timestamp < VERIFICATION_CACHE_TTL) {
+        if (cached.result.isBonkFun) {
+          verified.add(pool.mint)
+          newVerifiedCount++
+        }
+        continue
+      }
+
+      // Rate limit
+      if (i > 0) {
+        await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS))
+      }
+
+      // Use new verification with fallbacks
+      const result = await verifyTokenWithFallbacks(pool.mint, pool.poolAddress)
+
+      if (result.status === 'verified') {
+        // Only cache definitive results
+        const cacheResult: VerificationResult = {
+          isBonkFun: result.isBonkFun,
+          confidence: result.isBonkFun ? result.confidence : 'high',
+          source: 'pool-authority',
+        }
+        verificationCache.set(pool.mint, { result: cacheResult, timestamp: Date.now() })
+
+        if (result.isBonkFun) {
+          verified.add(pool.mint)
+          newVerifiedCount++
+        }
+      } else {
+        // Inconclusive - add to retry queue (don't cache false negatives)
+        inconclusiveCount++
+        pendingRetry.set(pool.mint, {
+          mint: pool.mint,
+          poolAddress: pool.poolAddress,
+          attempts: 1,
+          lastAttempt: Date.now(),
+          reason: result.reason
+        })
+      }
+
+      // Progress log
+      if ((i + 1) % 20 === 0) {
+        console.log(`[BonkFun] New token progress: ${i + 1}/${newPools.length}, ${newVerifiedCount} verified, ${inconclusiveCount} inconclusive`)
+      }
+    }
+
+    // Step 4: Update KV with new verified tokens
+    if (newVerifiedCount > 0) {
+      console.log(`[BonkFun] Adding ${newVerifiedCount} new verified tokens to cache (${inconclusiveCount} pending retry)`)
+      await saveToKV(verified)
+    }
+
+    tokenListCache = {
+      tokens: verified,
+      timestamp: Date.now(),
+      source: "helius",
+    }
+
+    return verified
   }
 
-  // Step 2: Filter to valid pools with pool addresses
-  const validPools = pools.filter((p) => p.mint && p.mint.length > 30 && p.poolAddress && p.poolAddress.length > 30)
-  console.log(`[BonkFun] No KV cache - verifying ${validPools.length} pools via Helius...`)
+  // COLD START: No KV cache - verify all pools
+  const validPools = pools.filter((p) => p.mint && p.mint.length > 30)
+  console.log(`[BonkFun] Cold start - verifying ${validPools.length} pools via Helius...`)
   console.log(`[BonkFun] This will take ~${Math.ceil(validPools.length * RATE_LIMIT_DELAY_MS / 1000 / 60)} minutes (rate limited to avoid 429 errors)`)
 
-  // Step 3: Verify pools one at a time with rate limiting
-  // We check the POOL address (not token mint) because BonkFun graduation happens on the pool
   let successCount = 0
-  let errorCount = 0
+  let inconclusiveCount = 0
 
   for (let i = 0; i < validPools.length; i++) {
     const pool = validPools[i]
@@ -389,36 +696,48 @@ async function doVerification(
       continue
     }
 
-    // Rate limit delay BEFORE each request
+    // Rate limit delay
     if (i > 0) {
       await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS))
     }
 
-    // Check POOL origin (not token mint) - this is where BonkFun graduation happens
-    const isBonkFun = await checkPoolOriginViaHelius(pool.poolAddress)
+    // Use new verification with fallbacks
+    const result = await verifyTokenWithFallbacks(pool.mint, pool.poolAddress)
 
-    // Cache the result
-    const result: VerificationResult = {
-      isBonkFun,
-      confidence: isBonkFun ? "high" : "medium",
-      source: "pool-authority",
-    }
-    verificationCache.set(pool.mint, { result, timestamp: Date.now() })
+    if (result.status === 'verified') {
+      // Only cache definitive results
+      const cacheResult: VerificationResult = {
+        isBonkFun: result.isBonkFun,
+        confidence: result.isBonkFun ? result.confidence : 'high',
+        source: 'pool-authority',
+      }
+      verificationCache.set(pool.mint, { result: cacheResult, timestamp: Date.now() })
 
-    if (isBonkFun) {
-      verified.add(pool.mint)
-      successCount++
+      if (result.isBonkFun) {
+        verified.add(pool.mint)
+        successCount++
+      }
+    } else {
+      // Inconclusive - add to retry queue
+      inconclusiveCount++
+      pendingRetry.set(pool.mint, {
+        mint: pool.mint,
+        poolAddress: pool.poolAddress,
+        attempts: 1,
+        lastAttempt: Date.now(),
+        reason: result.reason
+      })
     }
 
     // Progress log every 50 tokens
     if ((i + 1) % 50 === 0) {
-      console.log(`[BonkFun] Progress: ${i + 1}/${validPools.length} checked, ${verified.size} verified`)
+      console.log(`[BonkFun] Progress: ${i + 1}/${validPools.length} checked, ${verified.size} verified, ${inconclusiveCount} inconclusive`)
     }
   }
 
-  console.log(`[BonkFun] Completed: ${verified.size}/${validPools.length} verified as BonkFun tokens`)
+  console.log(`[BonkFun] Completed: ${verified.size}/${validPools.length} verified as BonkFun tokens (${inconclusiveCount} pending retry)`)
 
-  // Step 4: Save to KV for next time
+  // Save to KV
   if (verified.size > 0) {
     await saveToKV(verified)
   }
@@ -431,6 +750,91 @@ async function doVerification(
   }
 
   return verified
+}
+
+/**
+ * Process tokens in the retry queue with exponential backoff.
+ * Called by cron job to retry failed verifications.
+ */
+export async function processRetryQueue(): Promise<{ processed: number; verified: number; remaining: number }> {
+  const now = Date.now()
+  let processed = 0
+  let verified = 0
+
+  const toProcess: PendingRetryEntry[] = []
+
+  for (const [mint, entry] of pendingRetry) {
+    if (entry.attempts >= MAX_RETRY_ATTEMPTS) {
+      // Give up after max attempts - remove from queue
+      pendingRetry.delete(mint)
+      continue
+    }
+
+    const backoffMs = Math.min(
+      RETRY_BACKOFF_BASE_MS * Math.pow(2, entry.attempts - 1),
+      3600000 // Max 1 hour
+    )
+
+    if (now - entry.lastAttempt >= backoffMs) {
+      toProcess.push(entry)
+    }
+  }
+
+  if (toProcess.length === 0) {
+    return { processed: 0, verified: 0, remaining: pendingRetry.size }
+  }
+
+  console.log(`[BonkFun] Processing ${toProcess.length} tokens from retry queue...`)
+
+  for (const entry of toProcess) {
+    // Retry verification with fallbacks
+    const result = await verifyTokenWithFallbacks(entry.mint, entry.poolAddress)
+    processed++
+
+    if (result.status === 'verified') {
+      pendingRetry.delete(entry.mint)
+
+      if (result.isBonkFun) {
+        verified++
+
+        // Add to KV cache
+        const kvCached = await loadFromKV()
+        if (kvCached) {
+          kvCached.add(entry.mint)
+          await saveToKV(kvCached)
+        }
+
+        // Update in-memory cache
+        if (tokenListCache) {
+          tokenListCache.tokens.add(entry.mint)
+        }
+      }
+    } else {
+      // Still inconclusive - update attempt count
+      entry.attempts++
+      entry.lastAttempt = now
+      entry.reason = result.reason
+    }
+
+    // Rate limit between retries
+    await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS))
+  }
+
+  console.log(`[BonkFun] Retry queue: ${processed} processed, ${verified} verified, ${pendingRetry.size} remaining`)
+
+  return { processed, verified, remaining: pendingRetry.size }
+}
+
+/**
+ * Get retry queue status for monitoring.
+ */
+export function getRetryQueueStatus(): { size: number; entries: Array<{ mint: string; attempts: number; reason: string }> } {
+  const entries = Array.from(pendingRetry.values()).map(e => ({
+    mint: e.mint.slice(0, 8) + '...',
+    attempts: e.attempts,
+    reason: e.reason
+  }))
+  return { size: pendingRetry.size, entries: entries.slice(0, 10) } // Return first 10
 }
 
 // ============================================
