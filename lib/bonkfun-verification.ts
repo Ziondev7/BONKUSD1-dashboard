@@ -231,6 +231,90 @@ async function checkTokenOriginViaHelius(mintAddress: string): Promise<Verificat
   }
 }
 
+/**
+ * Check if a Raydium pool was created by BonkFun graduation.
+ * This checks the POOL address, not the token mint.
+ */
+async function checkPoolOriginViaHelius(poolAddress: string): Promise<boolean> {
+  const heliusApiKey = process.env.HELIUS_API_KEY
+  if (!heliusApiKey || !poolAddress || poolAddress.length < 30) return false
+
+  try {
+    const signaturesUrl = `https://api.helius.xyz/v0/addresses/${poolAddress}/transactions?api-key=${heliusApiKey}&limit=5`
+
+    const response = await fetch(signaturesUrl, {
+      headers: { Accept: "application/json" },
+    })
+
+    if (!response.ok) {
+      return false
+    }
+
+    const transactions: HeliusParsedTransaction[] = await response.json()
+
+    // Check the pool creation transaction for BonkFun involvement
+    for (const tx of transactions) {
+      if (!tx.instructions) continue
+
+      for (const ix of tx.instructions) {
+        // Check if graduate program created this pool
+        if (ix.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM) {
+          return true
+        }
+
+        // Check if LaunchLab program was involved
+        if (ix.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM) {
+          return true
+        }
+
+        // Check if CPMM pool was created with BonkFun involvement
+        if (ix.programId === BONKFUN_PROGRAMS.RAYDIUM_CPMM) {
+          // Look for graduate/launchlab program in inner instructions
+          if (ix.innerInstructions) {
+            for (const inner of ix.innerInstructions) {
+              if (
+                inner.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+                inner.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM
+              ) {
+                return true
+              }
+            }
+          }
+        }
+
+        // Check all inner instructions
+        if (ix.innerInstructions) {
+          for (const inner of ix.innerInstructions) {
+            if (
+              inner.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+              inner.programId === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM
+            ) {
+              return true
+            }
+          }
+        }
+      }
+
+      // Also check accountData for program involvement
+      if (tx.accountData) {
+        for (const acc of tx.accountData) {
+          if (
+            acc.account === BONKFUN_PROGRAMS.GRADUATE_PROGRAM ||
+            acc.account === BONKFUN_PROGRAMS.LAUNCHLAB_PROGRAM ||
+            acc.account === BONKFUN_PROGRAMS.PLATFORM_CONFIG
+          ) {
+            return true
+          }
+        }
+      }
+    }
+
+    return false
+  } catch {
+    return false
+  }
+}
+
 // ============================================
 // BATCH VERIFICATION (Optimized with KV caching)
 // ============================================
@@ -283,12 +367,13 @@ async function doVerification(
     return kvCached
   }
 
-  // Step 2: Filter to valid pools only
-  const validPools = pools.filter((p) => p.mint && p.mint.length > 30)
+  // Step 2: Filter to valid pools with pool addresses
+  const validPools = pools.filter((p) => p.mint && p.mint.length > 30 && p.poolAddress && p.poolAddress.length > 30)
   console.log(`[BonkFun] No KV cache - verifying ${validPools.length} pools via Helius...`)
   console.log(`[BonkFun] This will take ~${Math.ceil(validPools.length * RATE_LIMIT_DELAY_MS / 1000 / 60)} minutes (rate limited to avoid 429 errors)`)
 
-  // Step 3: Verify tokens one at a time with rate limiting
+  // Step 3: Verify pools one at a time with rate limiting
+  // We check the POOL address (not token mint) because BonkFun graduation happens on the pool
   let successCount = 0
   let errorCount = 0
 
@@ -309,29 +394,25 @@ async function doVerification(
       await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS))
     }
 
-    // Check token origin (single API call per token)
-    const result = await checkTokenOriginViaHelius(pool.mint)
+    // Check POOL origin (not token mint) - this is where BonkFun graduation happens
+    const isBonkFun = await checkPoolOriginViaHelius(pool.poolAddress)
 
-    if (result.source === "unknown") {
-      errorCount++
-      // If we're getting too many errors, back off more
-      if (errorCount > 10) {
-        console.log("[BonkFun] Too many errors, increasing delay...")
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-        errorCount = 0
-      }
-    } else {
+    // Cache the result
+    const result: VerificationResult = {
+      isBonkFun,
+      confidence: isBonkFun ? "high" : "medium",
+      source: "pool-authority",
+    }
+    verificationCache.set(pool.mint, { result, timestamp: Date.now() })
+
+    if (isBonkFun) {
+      verified.add(pool.mint)
       successCount++
-      // Cache the result
-      verificationCache.set(pool.mint, { result, timestamp: Date.now() })
-      if (result.isBonkFun) {
-        verified.add(pool.mint)
-      }
     }
 
     // Progress log every 50 tokens
     if ((i + 1) % 50 === 0) {
-      console.log(`[BonkFun] Progress: ${i + 1}/${validPools.length} checked, ${verified.size} verified, ${errorCount} errors`)
+      console.log(`[BonkFun] Progress: ${i + 1}/${validPools.length} checked, ${verified.size} verified`)
     }
   }
 
