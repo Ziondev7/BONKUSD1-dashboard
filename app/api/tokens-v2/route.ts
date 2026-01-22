@@ -416,6 +416,54 @@ async function fetchGeckoTerminalData(): Promise<Map<string, any>> {
 // MAIN TOKEN FETCHER - ON-CHAIN FIRST
 // ============================================
 
+// Fallback: Fetch from Raydium API (original method)
+async function fetchRaydiumPoolsFallback(): Promise<string[]> {
+  const tokenMints: Set<string> = new Set()
+
+  try {
+    const pageSize = 500
+    const maxPages = 5
+
+    for (let page = 1; page <= maxPages; page++) {
+      const url = `https://api-v3.raydium.io/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
+
+      const response = await fetchWithTimeout(url, 10000)
+      if (!response.ok) break
+
+      const json = await response.json()
+      if (!json.success || !json.data?.data) break
+
+      const pools = json.data.data
+
+      for (const pool of pools) {
+        const mintA = pool.mintA?.address
+        const mintB = pool.mintB?.address
+        const isAUSD1 = mintA === CONFIG.USD1_MINT
+        const isBUSD1 = mintB === CONFIG.USD1_MINT
+
+        if (!isAUSD1 && !isBUSD1) continue
+
+        const baseMint = isAUSD1 ? mintB : mintA
+        if (!baseMint || baseMint === CONFIG.USD1_MINT) continue
+
+        // Check for CPMM/LaunchLab pool types (BonkFun tokens)
+        const poolType = (pool.type || pool.poolType || "").toLowerCase()
+        if (poolType.includes("cpmm") || poolType.includes("launch") || poolType === "standard") {
+          tokenMints.add(baseMint)
+        }
+      }
+
+      if (pools.length < pageSize) break
+    }
+
+    console.log(`[Raydium Fallback] Found ${tokenMints.size} token mints`)
+  } catch (e) {
+    console.error("[Raydium Fallback] Error:", e)
+  }
+
+  return Array.from(tokenMints)
+}
+
 async function fetchAllTokensV2(): Promise<any[]> {
   console.log("[API-v2] Starting on-chain + API hybrid fetch...")
   const startTime = Date.now()
@@ -423,29 +471,53 @@ async function fetchAllTokensV2(): Promise<any[]> {
   // STEP 1: Get discovered pools (from cache or on-chain)
   let poolData = await getCachedPools()
   let discoverySource = "cache"
+  let tokenMints: string[] = []
 
   if (!poolData) {
     console.log("[API-v2] Cache miss - discovering pools on-chain...")
     try {
       const discovery = await discoverUSD1Pools()
-      poolData = {
-        pools: discovery.pools,
-        tokenMints: discovery.tokenMints,
-        discoveredAt: discovery.discoveredAt,
+
+      // If on-chain found pools, use them
+      if (discovery.tokenMints.length > 0) {
+        poolData = {
+          pools: discovery.pools,
+          tokenMints: discovery.tokenMints,
+          discoveredAt: discovery.discoveredAt,
+        }
+        await setCachedPools(discovery.pools, discovery.tokenMints)
+        discoverySource = "on-chain"
+        tokenMints = discovery.tokenMints
+        resetApiHealth("onchain")
+      } else {
+        // Fallback to Raydium API if on-chain returns empty
+        console.log("[API-v2] On-chain returned 0 pools, falling back to Raydium API...")
+        tokenMints = await fetchRaydiumPoolsFallback()
+        discoverySource = "raydium-api"
+
+        if (tokenMints.length > 0) {
+          await setCachedPools([], tokenMints)
+        }
       }
-      await setCachedPools(discovery.pools, discovery.tokenMints)
-      discoverySource = "on-chain"
-      resetApiHealth("onchain")
     } catch (e) {
-      console.error("[API-v2] On-chain discovery failed:", e)
+      console.error("[API-v2] On-chain discovery failed, trying Raydium fallback:", e)
       markApiError("onchain")
-      // Return empty if we have no cached data
-      return []
+
+      // Try Raydium API as fallback
+      tokenMints = await fetchRaydiumPoolsFallback()
+      discoverySource = "raydium-api"
     }
+  } else {
+    tokenMints = poolData.tokenMints
   }
 
-  const { tokenMints } = poolData
   console.log(`[API-v2] Pool discovery (${discoverySource}): ${tokenMints.length} tokens in ${Date.now() - startTime}ms`)
+
+  // If still no tokens, return empty
+  if (tokenMints.length === 0) {
+    console.error("[API-v2] No tokens discovered from any source!")
+    return []
+  }
 
   // STEP 2: Enrich with DexScreener and GeckoTerminal data (parallel)
   const enrichStart = Date.now()
