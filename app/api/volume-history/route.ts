@@ -415,9 +415,19 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
       const pairedSymbol = isAUSD1 ? symbolB : symbolA
       const pairedMint = isAUSD1 ? mintB : mintA
 
+      // Skip tokens ending with "USA" - they're from a different launchpad, not BonkFun
+      if (pairedMint && pairedMint.endsWith("USA")) return
+
       // Use whitelist to only include verified BonkFun tokens
       if (useWhitelist) {
         if (!bonkfunTokens.has(pairedMint)) return
+      } else {
+        // Fallback: filter by pool type when Dune whitelist unavailable
+        // BonkFun tokens use CPMM/LaunchLab pools
+        const poolType = (pool.type || pool.poolType || "").toLowerCase()
+        if (!poolType.includes("cpmm") && !poolType.includes("launch")) {
+          return
+        }
       }
 
       const volume24h = pool.day?.volume || 0
