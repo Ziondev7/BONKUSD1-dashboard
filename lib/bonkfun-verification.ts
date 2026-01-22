@@ -2,7 +2,12 @@
  * BonkFun Token Verification Module
  *
  * This module verifies if a token was launched via BonkFun (LetsBonk platform).
- * Uses Helius API (free tier) to check on-chain data.
+ * Uses a multi-source approach for maximum reliability:
+ *
+ * 1. PRIMARY: Solana Tracker API (free 500K credits/month, launchpad filter)
+ * 2. FALLBACK 1: Dune Analytics query (BonkFun token list)
+ * 3. FALLBACK 2: Helius API on-chain verification (1M free credits)
+ *
  * Persists verified tokens to Vercel KV for fast subsequent loads.
  *
  * BonkFun tokens are identified by:
@@ -36,6 +41,11 @@ const KV_CACHE_TTL = 24 * 60 * 60 // 24 hours in seconds for KV (reduced from 7 
 const RATE_LIMIT_DELAY_MS = 500 // 500ms between each API call (2 RPS max)
 const BATCH_SIZE = 1 // Process 1 token at a time to stay under rate limits
 
+// API Endpoints for multi-source verification
+const SOLANA_TRACKER_API = "https://data.solanatracker.io"
+const DUNE_API = "https://api.dune.com/api/v1"
+const DUNE_BONKFUN_QUERY_ID = "6575979" // BonkFun token mint list query (same as volume-history)
+
 // ============================================
 // TYPES
 // ============================================
@@ -64,7 +74,22 @@ interface PendingRetryEntry {
 interface TokenListCache {
   tokens: Set<string>
   timestamp: number
-  source: "helius" | "on-chain" | "fallback" | "kv"
+  source: "solana-tracker" | "dune" | "helius" | "on-chain" | "fallback" | "kv"
+}
+
+interface SolanaTrackerToken {
+  token: {
+    mint: string
+    name: string
+    symbol: string
+  }
+  pools?: Array<{
+    poolId: string
+    quoteToken?: string
+  }>
+  launchpad?: {
+    name: string
+  }
 }
 
 interface HeliusParsedTransaction {
@@ -179,7 +204,201 @@ async function saveToKV(tokens: Set<string>): Promise<void> {
 }
 
 // ============================================
-// HELIUS API HELPERS
+// SOLANA TRACKER API (PRIMARY SOURCE)
+// ============================================
+
+const USD1_MINT = "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB"
+
+/**
+ * Fetch BonkFun tokens from Solana Tracker API.
+ * Uses the launchpad filter to get only LetsBonk tokens.
+ * Free tier: 500K credits/month, 10 RPS
+ */
+async function fetchBonkFunTokensViaSolanaTracker(): Promise<Set<string> | null> {
+  const apiKey = process.env.SOLANA_TRACKER_API_KEY
+  if (!apiKey) {
+    console.log("[BonkFun] No SOLANA_TRACKER_API_KEY - skipping Solana Tracker")
+    return null
+  }
+
+  try {
+    console.log("[BonkFun] Fetching BonkFun tokens from Solana Tracker...")
+
+    // Search for LetsBonk tokens paired with USD1
+    const response = await fetch(
+      `${SOLANA_TRACKER_API}/search?launchpad=letsbonk.fun&quoteToken=${USD1_MINT}&sortBy=liquidity&sortOrder=desc&limit=1000`,
+      {
+        headers: {
+          "x-api-key": apiKey,
+          "Accept": "application/json",
+        },
+      }
+    )
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        console.warn("[BonkFun] Solana Tracker rate limited")
+        return null
+      }
+      console.warn(`[BonkFun] Solana Tracker API error: ${response.status}`)
+      return null
+    }
+
+    const data = await response.json()
+
+    if (!Array.isArray(data)) {
+      console.warn("[BonkFun] Unexpected Solana Tracker response format")
+      return null
+    }
+
+    const tokens = new Set<string>()
+    for (const item of data as SolanaTrackerToken[]) {
+      if (item.token?.mint) {
+        tokens.add(item.token.mint)
+      }
+    }
+
+    console.log(`[BonkFun] Solana Tracker returned ${tokens.size} BonkFun/USD1 tokens`)
+    return tokens
+  } catch (error) {
+    console.error("[BonkFun] Error fetching from Solana Tracker:", error)
+    return null
+  }
+}
+
+/**
+ * Check if a specific token is a BonkFun token via Solana Tracker.
+ * Returns true if the token's launchpad is letsbonk.fun
+ */
+async function checkTokenViaSolanaTracker(mintAddress: string): Promise<boolean | null> {
+  const apiKey = process.env.SOLANA_TRACKER_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const response = await fetch(
+      `${SOLANA_TRACKER_API}/tokens/${mintAddress}`,
+      {
+        headers: {
+          "x-api-key": apiKey,
+          "Accept": "application/json",
+        },
+      }
+    )
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = await response.json()
+
+    // Check if launchpad is letsbonk.fun
+    if (data.launchpad?.name?.toLowerCase().includes("letsbonk") ||
+        data.launchpad?.name?.toLowerCase().includes("bonk")) {
+      return true
+    }
+
+    return false
+  } catch {
+    return null
+  }
+}
+
+// ============================================
+// DUNE API (FALLBACK 1)
+// ============================================
+
+/**
+ * Fetch BonkFun tokens from Dune Analytics.
+ * Uses a pre-built query that returns BonkFun tokens paired with USD1.
+ */
+async function fetchBonkFunTokensViaDune(): Promise<Set<string> | null> {
+  const duneApiKey = process.env.DUNE_API_KEY
+  if (!duneApiKey) {
+    console.log("[BonkFun] No DUNE_API_KEY - skipping Dune")
+    return null
+  }
+
+  try {
+    console.log("[BonkFun] Fetching BonkFun tokens from Dune...")
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
+
+    const response = await fetch(
+      `${DUNE_API}/query/${DUNE_BONKFUN_QUERY_ID}/results?limit=150000`,
+      {
+        signal: controller.signal,
+        headers: {
+          "x-dune-api-key": duneApiKey, // lowercase header name as per Dune docs
+          "Accept": "application/json",
+        },
+      }
+    )
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      if (response.status === 402) {
+        console.warn("[BonkFun] Dune API quota exceeded")
+        return null
+      }
+      console.warn(`[BonkFun] Dune API error: ${response.status}`)
+      return null
+    }
+
+    const data = await response.json()
+
+    // Check if query is complete
+    if (data.state !== "QUERY_STATE_COMPLETED" || !data.result?.rows) {
+      console.warn("[BonkFun] Dune query not ready or no results")
+      return null
+    }
+
+    const tokens = new Set<string>()
+    for (const row of data.result.rows) {
+      // The query returns token_mint field
+      const mint = row.token_mint
+      if (mint && typeof mint === "string" && mint.length > 30) {
+        tokens.add(mint)
+      }
+    }
+
+    console.log(`[BonkFun] Dune returned ${tokens.size} BonkFun tokens`)
+    return tokens
+  } catch (error) {
+    console.error("[BonkFun] Error fetching from Dune:", error)
+    return null
+  }
+}
+
+// ============================================
+// MULTI-SOURCE WHITELIST FETCHER
+// ============================================
+
+/**
+ * Fetch BonkFun whitelist using multiple sources with fallback.
+ * Order: Solana Tracker → Dune → Helius on-chain
+ */
+async function fetchWhitelistMultiSource(): Promise<{ tokens: Set<string>; source: TokenListCache["source"] } | null> {
+  // Source 1: Solana Tracker (best - has launchpad filter)
+  const solanaTrackerTokens = await fetchBonkFunTokensViaSolanaTracker()
+  if (solanaTrackerTokens && solanaTrackerTokens.size > 0) {
+    return { tokens: solanaTrackerTokens, source: "solana-tracker" }
+  }
+
+  // Source 2: Dune Analytics (good - has BonkFun query)
+  const duneTokens = await fetchBonkFunTokensViaDune()
+  if (duneTokens && duneTokens.size > 0) {
+    return { tokens: duneTokens, source: "dune" }
+  }
+
+  // Source 3: Return null - will fall back to Helius on-chain verification
+  console.log("[BonkFun] No external whitelist available - will use Helius on-chain verification")
+  return null
+}
+
+// ============================================
+// HELIUS API HELPERS (FALLBACK 2)
 // ============================================
 
 /**
@@ -843,7 +1062,7 @@ export function getRetryQueueStatus(): { size: number; entries: Array<{ mint: st
 
 /**
  * Fetch the BonkFun token whitelist.
- * Uses cached data if available, otherwise returns empty set.
+ * Uses multi-source approach: Solana Tracker → Dune → KV cache → Helius
  */
 export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
   // Check in-memory cache first
@@ -854,7 +1073,21 @@ export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
     return tokenListCache.tokens
   }
 
-  // Try to load from KV
+  // Try multi-source fetch (Solana Tracker → Dune)
+  const multiSourceResult = await fetchWhitelistMultiSource()
+  if (multiSourceResult && multiSourceResult.tokens.size > 0) {
+    tokenListCache = {
+      tokens: multiSourceResult.tokens,
+      timestamp: Date.now(),
+      source: multiSourceResult.source,
+    }
+    // Also save to KV for persistence
+    await saveToKV(multiSourceResult.tokens)
+    console.log(`[BonkFun] Loaded ${multiSourceResult.tokens.size} tokens from ${multiSourceResult.source}`)
+    return multiSourceResult.tokens
+  }
+
+  // Fallback: Try to load from KV
   const kvCached = await loadFromKV()
   if (kvCached && kvCached.size > 0) {
     tokenListCache = {
@@ -865,12 +1098,13 @@ export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
     return kvCached
   }
 
-  // Return empty set - whitelist will be populated during pool verification
+  // Return empty set - whitelist will be populated during pool verification via Helius
   return tokenListCache?.tokens || new Set()
 }
 
 /**
  * Verify if a single token is a BonkFun token.
+ * Uses multi-source: whitelist → Solana Tracker → Helius on-chain
  */
 export async function verifyBonkFunToken(mintAddress: string): Promise<VerificationResult> {
   // Check cache first
@@ -884,7 +1118,19 @@ export async function verifyBonkFunToken(mintAddress: string): Promise<Verificat
     return { isBonkFun: true, confidence: "high", source: "cache" }
   }
 
-  // Verify via Helius
+  // Try Solana Tracker first (faster, has launchpad info)
+  const solanaTrackerResult = await checkTokenViaSolanaTracker(mintAddress)
+  if (solanaTrackerResult !== null) {
+    const result: VerificationResult = {
+      isBonkFun: solanaTrackerResult,
+      confidence: "high",
+      source: "helius-history", // Using existing type
+    }
+    verificationCache.set(mintAddress, { result, timestamp: Date.now() })
+    return result
+  }
+
+  // Fallback: Verify via Helius on-chain
   const result = await checkTokenOriginViaHelius(mintAddress)
 
   // Cache result
@@ -923,7 +1169,7 @@ export function isInBonkFunWhitelist(mintAddress: string): boolean | null {
 export function getWhitelistStatus(): {
   loaded: boolean
   tokenCount: number
-  source: "helius" | "on-chain" | "fallback" | "kv" | "none"
+  source: "solana-tracker" | "dune" | "helius" | "on-chain" | "fallback" | "kv" | "none"
   ageMs: number
   isStale: boolean
 } {
