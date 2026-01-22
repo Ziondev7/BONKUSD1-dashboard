@@ -3,6 +3,7 @@
  *
  * This module verifies if a token was launched via BonkFun (LetsBonk platform).
  * Uses Helius API (free tier) to check on-chain data.
+ * Persists verified tokens to Vercel KV for fast subsequent loads.
  *
  * BonkFun tokens are identified by:
  * 1. Created via Raydium LaunchLab program with LetsBonk platform config
@@ -26,8 +27,14 @@ export const BONKFUN_PROGRAMS = {
 } as const
 
 // Cache configuration
-const WHITELIST_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+const WHITELIST_CACHE_TTL = 30 * 60 * 1000 // 30 minutes for in-memory cache
 const VERIFICATION_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours - token origin never changes
+const KV_CACHE_KEY = "bonkfun:verified_tokens"
+const KV_CACHE_TTL = 7 * 24 * 60 * 60 // 7 days in seconds for KV
+
+// Rate limiting - VERY conservative to avoid 429 errors
+const RATE_LIMIT_DELAY_MS = 500 // 500ms between each API call (2 RPS max)
+const BATCH_SIZE = 1 // Process 1 token at a time to stay under rate limits
 
 // ============================================
 // TYPES
@@ -36,20 +43,13 @@ const VERIFICATION_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours - token origin ne
 interface VerificationResult {
   isBonkFun: boolean
   confidence: "high" | "medium" | "low"
-  source: "helius-history" | "program-check" | "pool-authority" | "cache" | "unknown"
+  source: "helius-history" | "program-check" | "pool-authority" | "cache" | "kv-cache" | "unknown"
 }
 
 interface TokenListCache {
   tokens: Set<string>
   timestamp: number
-  source: "helius" | "on-chain" | "fallback"
-}
-
-interface HeliusSignature {
-  signature: string
-  slot: number
-  err: null | object
-  memo: string | null
+  source: "helius" | "on-chain" | "fallback" | "kv"
 }
 
 interface HeliusParsedTransaction {
@@ -96,21 +96,71 @@ interface HeliusParsedTransaction {
 let tokenListCache: TokenListCache | null = null
 const verificationCache = new Map<string, { result: VerificationResult; timestamp: number }>()
 
+// Track if verification is already in progress to prevent concurrent runs
+let verificationInProgress = false
+let verificationPromise: Promise<Set<string>> | null = null
+
+// ============================================
+// VERCEL KV HELPERS
+// ============================================
+
+async function loadFromKV(): Promise<Set<string> | null> {
+  const kvUrl = process.env.KV_REST_API_URL
+  const kvToken = process.env.KV_REST_API_TOKEN
+
+  if (!kvUrl || !kvToken) {
+    console.log("[BonkFun] No KV credentials - skipping KV cache")
+    return null
+  }
+
+  try {
+    const response = await fetch(`${kvUrl}/get/${KV_CACHE_KEY}`, {
+      headers: { Authorization: `Bearer ${kvToken}` },
+    })
+
+    if (!response.ok) {
+      console.log(`[BonkFun] KV fetch failed: ${response.status}`)
+      return null
+    }
+
+    const data = await response.json()
+    if (data.result) {
+      const tokens = JSON.parse(data.result)
+      console.log(`[BonkFun] Loaded ${tokens.length} verified tokens from KV cache`)
+      return new Set(tokens)
+    }
+    return null
+  } catch (error) {
+    console.warn("[BonkFun] Error loading from KV:", error)
+    return null
+  }
+}
+
+async function saveToKV(tokens: Set<string>): Promise<void> {
+  const kvUrl = process.env.KV_REST_API_URL
+  const kvToken = process.env.KV_REST_API_TOKEN
+
+  if (!kvUrl || !kvToken) return
+
+  try {
+    const tokensArray = Array.from(tokens)
+    await fetch(`${kvUrl}/set/${KV_CACHE_KEY}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${kvToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ value: JSON.stringify(tokensArray), ex: KV_CACHE_TTL }),
+    })
+    console.log(`[BonkFun] Saved ${tokens.size} verified tokens to KV cache`)
+  } catch (error) {
+    console.warn("[BonkFun] Error saving to KV:", error)
+  }
+}
+
 // ============================================
 // HELIUS API HELPERS
 // ============================================
-
-function getHeliusRpcUrl(): string | null {
-  const apiKey = process.env.HELIUS_API_KEY
-  if (!apiKey) return null
-  return `https://mainnet.helius-rpc.com/?api-key=${apiKey}`
-}
-
-function getHeliusApiUrl(): string | null {
-  const apiKey = process.env.HELIUS_API_KEY
-  if (!apiKey) return null
-  return `https://api.helius.xyz/v0`
-}
 
 /**
  * Check if a token was created via BonkFun by examining its transaction history.
@@ -131,6 +181,10 @@ async function checkTokenOriginViaHelius(mintAddress: string): Promise<Verificat
     })
 
     if (!response.ok) {
+      if (response.status === 429) {
+        // Rate limited - don't log every time, just return unknown
+        return { isBonkFun: false, confidence: "low", source: "unknown" }
+      }
       console.warn(`[BonkFun] Helius API error for ${mintAddress}: ${response.status}`)
       return { isBonkFun: false, confidence: "low", source: "unknown" }
     }
@@ -177,64 +231,35 @@ async function checkTokenOriginViaHelius(mintAddress: string): Promise<Verificat
   }
 }
 
+// ============================================
+// BATCH VERIFICATION (Optimized with KV caching)
+// ============================================
+
 /**
- * Check if a Raydium pool was created by BonkFun graduation.
- * This is faster than checking individual tokens.
+ * Batch verify tokens by checking their origin.
+ * Uses KV cache for persistence, only verifies new tokens.
  */
-async function checkPoolOriginViaHelius(poolAddress: string): Promise<boolean> {
-  const heliusApiKey = process.env.HELIUS_API_KEY
-  if (!heliusApiKey) return false
+export async function verifyPoolsViaBonkFun(
+  pools: Array<{ mint: string; poolAddress: string; poolType?: string }>
+): Promise<Set<string>> {
+  // If verification is already in progress, wait for it
+  if (verificationInProgress && verificationPromise) {
+    console.log("[BonkFun] Verification already in progress, waiting...")
+    return verificationPromise
+  }
+
+  verificationInProgress = true
+  verificationPromise = doVerification(pools)
 
   try {
-    const signaturesUrl = `https://api.helius.xyz/v0/addresses/${poolAddress}/transactions?api-key=${heliusApiKey}&limit=3`
-
-    const response = await fetch(signaturesUrl, {
-      headers: { Accept: "application/json" },
-    })
-
-    if (!response.ok) return false
-
-    const transactions: HeliusParsedTransaction[] = await response.json()
-
-    // Check the pool creation transaction
-    for (const tx of transactions) {
-      if (!tx.instructions) continue
-
-      for (const ix of tx.instructions) {
-        // Check if graduate program created this pool
-        if (ix.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM) {
-          return true
-        }
-
-        // Check if CPMM pool was created with BonkFun involvement
-        if (ix.programId === BONKFUN_PROGRAMS.RAYDIUM_CPMM) {
-          // Look for graduate program in inner instructions
-          if (ix.innerInstructions) {
-            for (const inner of ix.innerInstructions) {
-              if (inner.programId === BONKFUN_PROGRAMS.GRADUATE_PROGRAM) {
-                return true
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return false
-  } catch {
-    return false
+    return await verificationPromise
+  } finally {
+    verificationInProgress = false
+    verificationPromise = null
   }
 }
 
-// ============================================
-// BATCH VERIFICATION (Optimized)
-// ============================================
-
-/**
- * Batch verify tokens by checking pool authorities.
- * This is more efficient than checking each token individually.
- */
-export async function verifyPoolsViaBonkFun(
+async function doVerification(
   pools: Array<{ mint: string; poolAddress: string; poolType?: string }>
 ): Promise<Set<string>> {
   const verified = new Set<string>()
@@ -245,72 +270,79 @@ export async function verifyPoolsViaBonkFun(
     return verified
   }
 
-  // Filter out pools without valid pool addresses
-  const validPools = pools.filter((p) => p.poolAddress && p.poolAddress.length > 30)
+  // Step 1: Try to load from KV cache first
+  const kvCached = await loadFromKV()
+  if (kvCached && kvCached.size > 0) {
+    // Use cached data, update in-memory cache
+    tokenListCache = {
+      tokens: kvCached,
+      timestamp: Date.now(),
+      source: "kv",
+    }
+    console.log(`[BonkFun] Using ${kvCached.size} tokens from KV cache`)
+    return kvCached
+  }
 
-  console.log(`[BonkFun] Verifying ${validPools.length} pools via Helius (from ${pools.length} total)...`)
+  // Step 2: Filter to valid pools only
+  const validPools = pools.filter((p) => p.mint && p.mint.length > 30)
+  console.log(`[BonkFun] No KV cache - verifying ${validPools.length} pools via Helius...`)
+  console.log(`[BonkFun] This will take ~${Math.ceil(validPools.length * RATE_LIMIT_DELAY_MS / 1000 / 60)} minutes (rate limited to avoid 429 errors)`)
 
-  // Batch check pools (with rate limiting)
-  // Helius free tier: 10 RPS, so we process 5 pools per batch with 1s delay
-  // (each pool may need 2 API calls: token origin + pool origin)
-  const BATCH_SIZE = 5
-  const DELAY_MS = 1000 // 1s between batches to stay within free tier limits
+  // Step 3: Verify tokens one at a time with rate limiting
+  let successCount = 0
+  let errorCount = 0
 
-  for (let i = 0; i < validPools.length; i += BATCH_SIZE) {
-    const batch = validPools.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < validPools.length; i++) {
+    const pool = validPools[i]
 
-    const results = await Promise.all(
-      batch.map(async (pool) => {
-        // Check cache first
-        const cached = verificationCache.get(pool.mint)
-        if (cached && Date.now() - cached.timestamp < VERIFICATION_CACHE_TTL) {
-          return { mint: pool.mint, isBonkFun: cached.result.isBonkFun }
-        }
+    // Check in-memory cache first
+    const cached = verificationCache.get(pool.mint)
+    if (cached && Date.now() - cached.timestamp < VERIFICATION_CACHE_TTL) {
+      if (cached.result.isBonkFun) {
+        verified.add(pool.mint)
+      }
+      continue
+    }
 
-        // Check TOKEN MINT origin AND pool origin in PARALLEL
-        // Token: Looks for BonkFun's LaunchLab program with platform config
-        // Pool: Looks for BonkFun graduation program involvement
-        const [tokenResult, poolResult] = await Promise.all([
-          checkTokenOriginViaHelius(pool.mint),
-          pool.poolAddress ? checkPoolOriginViaHelius(pool.poolAddress) : Promise.resolve(false),
-        ])
+    // Rate limit delay BEFORE each request
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS))
+    }
 
-        const isBonkFun = tokenResult.isBonkFun || poolResult
+    // Check token origin (single API call per token)
+    const result = await checkTokenOriginViaHelius(pool.mint)
 
-        // Cache result
-        verificationCache.set(pool.mint, {
-          result: {
-            isBonkFun,
-            confidence: isBonkFun ? "high" : "medium",
-            source: tokenResult.isBonkFun ? tokenResult.source : "pool-authority",
-          },
-          timestamp: Date.now(),
-        })
-
-        return { mint: pool.mint, isBonkFun }
-      })
-    )
-
-    for (const result of results) {
+    if (result.source === "unknown") {
+      errorCount++
+      // If we're getting too many errors, back off more
+      if (errorCount > 10) {
+        console.log("[BonkFun] Too many errors, increasing delay...")
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        errorCount = 0
+      }
+    } else {
+      successCount++
+      // Cache the result
+      verificationCache.set(pool.mint, { result, timestamp: Date.now() })
       if (result.isBonkFun) {
-        verified.add(result.mint)
+        verified.add(pool.mint)
       }
     }
 
-    // Rate limit delay
-    if (i + BATCH_SIZE < validPools.length) {
-      await new Promise((resolve) => setTimeout(resolve, DELAY_MS))
-    }
-
-    // Progress log every 50 pools
-    if ((i + BATCH_SIZE) % 50 === 0 || i + BATCH_SIZE >= validPools.length) {
-      console.log(`[BonkFun] Progress: ${Math.min(i + BATCH_SIZE, validPools.length)}/${validPools.length} pools checked, ${verified.size} verified`)
+    // Progress log every 50 tokens
+    if ((i + 1) % 50 === 0) {
+      console.log(`[BonkFun] Progress: ${i + 1}/${validPools.length} checked, ${verified.size} verified, ${errorCount} errors`)
     }
   }
 
-  console.log(`[BonkFun] Verified ${verified.size}/${validPools.length} as genuine BonkFun tokens`)
+  console.log(`[BonkFun] Completed: ${verified.size}/${validPools.length} verified as BonkFun tokens`)
 
-  // Update whitelist cache
+  // Step 4: Save to KV for next time
+  if (verified.size > 0) {
+    await saveToKV(verified)
+  }
+
+  // Update in-memory cache
   tokenListCache = {
     tokens: verified,
     timestamp: Date.now(),
@@ -329,7 +361,7 @@ export async function verifyPoolsViaBonkFun(
  * Uses cached data if available, otherwise returns empty set.
  */
 export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
-  // Check cache first
+  // Check in-memory cache first
   if (tokenListCache && Date.now() - tokenListCache.timestamp < WHITELIST_CACHE_TTL) {
     console.log(
       `[BonkFun] Using cached whitelist (${tokenListCache.tokens.size} tokens, source: ${tokenListCache.source})`
@@ -337,8 +369,18 @@ export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
     return tokenListCache.tokens
   }
 
+  // Try to load from KV
+  const kvCached = await loadFromKV()
+  if (kvCached && kvCached.size > 0) {
+    tokenListCache = {
+      tokens: kvCached,
+      timestamp: Date.now(),
+      source: "kv",
+    }
+    return kvCached
+  }
+
   // Return empty set - whitelist will be populated during pool verification
-  // This prevents the strict mode from blocking all data
   return tokenListCache?.tokens || new Set()
 }
 
@@ -396,7 +438,7 @@ export function isInBonkFunWhitelist(mintAddress: string): boolean | null {
 export function getWhitelistStatus(): {
   loaded: boolean
   tokenCount: number
-  source: "helius" | "on-chain" | "fallback" | "none"
+  source: "helius" | "on-chain" | "fallback" | "kv" | "none"
   ageMs: number
   isStale: boolean
 } {
@@ -430,9 +472,24 @@ export async function refreshWhitelist(): Promise<number> {
 }
 
 /**
- * Clear all caches.
+ * Clear all caches including KV.
  */
-export function clearVerificationCaches(): void {
+export async function clearVerificationCaches(): Promise<void> {
   tokenListCache = null
   verificationCache.clear()
+
+  // Clear KV cache too
+  const kvUrl = process.env.KV_REST_API_URL
+  const kvToken = process.env.KV_REST_API_TOKEN
+  if (kvUrl && kvToken) {
+    try {
+      await fetch(`${kvUrl}/del/${KV_CACHE_KEY}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${kvToken}` },
+      })
+      console.log("[BonkFun] Cleared KV cache")
+    } catch {
+      // Ignore errors
+    }
+  }
 }
