@@ -75,9 +75,25 @@ export interface MetricsSnapshot {
 }
 
 export interface ApiHealth {
-  raydium: boolean
+  raydium?: boolean
   dexscreener: boolean
   geckoterminal: boolean
+  onchain?: boolean // v2 API on-chain discovery health
+}
+
+export interface RpcHealth {
+  [key: string]: {
+    healthy: boolean
+    errorCount: number
+    requestCount: number
+  }
+}
+
+export interface CacheStats {
+  poolCache: { hit: boolean; age: number | null; count: number }
+  metadataCache: { count: number }
+  enrichedCache: { hit: boolean; age: number | null; count: number }
+  storage: 'vercel-kv' | 'memory'
 }
 
 export interface ApiResponse {
@@ -88,4 +104,9 @@ export interface ApiResponse {
   age?: number
   health?: ApiHealth
   error?: string
+  // v2 API specific fields
+  discovery?: 'on-chain' | 'api'
+  version?: 'v1' | 'v2'
+  rpcHealth?: RpcHealth
+  cacheStats?: CacheStats
 }

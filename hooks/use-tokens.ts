@@ -7,6 +7,10 @@ import type { Token, ApiResponse, StatusState, MetricsSnapshot } from "@/lib/typ
 const CACHE_KEY = "bonkusd1_tokens_v6"
 const LOCAL_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
+// Use v2 API (on-chain discovery) if enabled
+const USE_V2_API = process.env.NEXT_PUBLIC_USE_V2_API === "true"
+const API_ENDPOINT = USE_V2_API ? "/api/tokens-v2" : "/api/tokens"
+
 // ============================================
 // LOCAL STORAGE HELPERS
 // ============================================
@@ -83,8 +87,9 @@ export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   // SWR with stale-while-revalidate
+  // Uses v2 API (on-chain discovery) if NEXT_PUBLIC_USE_V2_API=true
   const { data, error, isLoading, mutate } = useSWR<ApiResponse>(
-    "/api/tokens",
+    API_ENDPOINT,
     fetcher,
     {
       refreshInterval,
