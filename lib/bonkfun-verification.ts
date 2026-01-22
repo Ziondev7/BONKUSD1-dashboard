@@ -78,11 +78,9 @@ interface TokenListCache {
 }
 
 interface SolanaTrackerToken {
-  token: {
-    mint: string
-    name: string
-    symbol: string
-  }
+  mint: string
+  name: string
+  symbol: string
   pools?: Array<{
     poolId: string
     quoteToken?: string
@@ -90,6 +88,11 @@ interface SolanaTrackerToken {
   launchpad?: {
     name: string
   }
+}
+
+interface SolanaTrackerResponse {
+  status: string
+  data: SolanaTrackerToken[]
 }
 
 interface HeliusParsedTransaction {
@@ -225,8 +228,9 @@ async function fetchBonkFunTokensViaSolanaTracker(): Promise<Set<string> | null>
     console.log("[BonkFun] Fetching BonkFun tokens from Solana Tracker...")
 
     // Search for LetsBonk tokens paired with USD1
+    // Note: sortBy parameter is not supported, API returns by default order
     const response = await fetch(
-      `${SOLANA_TRACKER_API}/search?launchpad=letsbonk.fun&quoteToken=${USD1_MINT}&sortBy=liquidity&sortOrder=desc&limit=1000`,
+      `${SOLANA_TRACKER_API}/search?launchpad=letsbonk.fun&quoteToken=${USD1_MINT}&limit=1000`,
       {
         headers: {
           "x-api-key": apiKey,
@@ -244,17 +248,19 @@ async function fetchBonkFunTokensViaSolanaTracker(): Promise<Set<string> | null>
       return null
     }
 
-    const data = await response.json()
+    const data = await response.json() as SolanaTrackerResponse
 
-    if (!Array.isArray(data)) {
-      console.warn("[BonkFun] Unexpected Solana Tracker response format")
+    // Solana Tracker returns {status: "success", data: [...]}
+    if (!data || data.status !== "success" || !Array.isArray(data.data)) {
+      console.warn("[BonkFun] Unexpected Solana Tracker response format:", JSON.stringify(data).slice(0, 200))
       return null
     }
 
     const tokens = new Set<string>()
-    for (const item of data as SolanaTrackerToken[]) {
-      if (item.token?.mint) {
-        tokens.add(item.token.mint)
+    for (const item of data.data) {
+      // Each item has mint directly (not nested under token)
+      if (item.mint) {
+        tokens.add(item.mint)
       }
     }
 
@@ -1062,7 +1068,17 @@ export function getRetryQueueStatus(): { size: number; entries: Array<{ mint: st
 
 /**
  * Fetch the BonkFun token whitelist.
- * Uses multi-source approach: Solana Tracker → Dune → KV cache → Helius
+ *
+ * IMPORTANT: Solana Tracker's launchpad filter only returns PRE-GRADUATION tokens
+ * (tokens still on bonding curve). Graduated tokens on Raydium won't appear there.
+ *
+ * Strategy:
+ * 1. Load KV cache (graduated tokens verified via Helius)
+ * 2. Return KV cache if available
+ * 3. If no cache, return empty - Helius verification will populate it
+ *
+ * Solana Tracker is now only used in discover-tokens cron for finding
+ * tokens that are about to graduate.
  */
 export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
   // Check in-memory cache first
@@ -1073,21 +1089,7 @@ export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
     return tokenListCache.tokens
   }
 
-  // Try multi-source fetch (Solana Tracker → Dune)
-  const multiSourceResult = await fetchWhitelistMultiSource()
-  if (multiSourceResult && multiSourceResult.tokens.size > 0) {
-    tokenListCache = {
-      tokens: multiSourceResult.tokens,
-      timestamp: Date.now(),
-      source: multiSourceResult.source,
-    }
-    // Also save to KV for persistence
-    await saveToKV(multiSourceResult.tokens)
-    console.log(`[BonkFun] Loaded ${multiSourceResult.tokens.size} tokens from ${multiSourceResult.source}`)
-    return multiSourceResult.tokens
-  }
-
-  // Fallback: Try to load from KV
+  // Load from KV cache (has graduated tokens from Helius verification)
   const kvCached = await loadFromKV()
   if (kvCached && kvCached.size > 0) {
     tokenListCache = {
@@ -1095,8 +1097,11 @@ export async function fetchBonkFunWhitelist(): Promise<Set<string>> {
       timestamp: Date.now(),
       source: "kv",
     }
+    console.log(`[BonkFun] Loaded ${kvCached.size} verified tokens from KV cache`)
     return kvCached
   }
+
+  console.log("[BonkFun] No cached whitelist - will use Helius on-chain verification")
 
   // Return empty set - whitelist will be populated during pool verification via Helius
   return tokenListCache?.tokens || new Set()
