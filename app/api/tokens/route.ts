@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { fetchBonkFunWhitelist, getWhitelistStatus } from "@/lib/bonkfun-verification"
+import { fetchBonkFunWhitelist, getWhitelistStatus, verifyPoolsViaBonkFun } from "@/lib/bonkfun-verification"
 
 // ============================================
 // CONFIGURATION
@@ -557,35 +557,38 @@ async function fetchAllTokens(): Promise<any[]> {
   // Determine verification mode based on whitelist availability
   const useWhitelist = bonkFunWhitelist.size > 0
 
-  if (!useWhitelist) {
-    console.warn("[API] BonkFun whitelist unavailable - using pool-type fallback filtering")
-    console.warn("[API] Configure DUNE_API_KEY for authoritative BonkFun verification")
-  }
-
   // Filter Raydium pools based on verification mode
   const verifiedRaydiumPools = new Map<string, any>()
 
   if (useWhitelist) {
-    // PREFERRED: Use Dune whitelist as authoritative source
+    // Use cached whitelist (from previous Helius verification)
     for (const [mint, data] of raydiumPools) {
       if (bonkFunWhitelist.has(mint)) {
-        verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true, verifiedBy: "dune-whitelist" })
+        verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true, verifiedBy: "helius-verified" })
       }
     }
     console.log(`[API] Whitelist verification: ${verifiedRaydiumPools.size}/${raydiumPools.size} tokens verified`)
   } else {
-    // FALLBACK: Use pool-type heuristic (less accurate but works without Dune)
-    // BonkFun tokens typically use CPMM pools after graduation
+    // HELIUS VERIFICATION: Check pool origins on-chain via Helius API (free)
+    // This verifies tokens by checking if their pools were created by BonkFun graduation
+    console.log("[API] No cached whitelist - verifying via Helius on-chain data...")
+
+    // Prepare pool data for verification
+    const poolsToVerify = Array.from(raydiumPools.entries()).map(([mint, data]) => ({
+      mint,
+      poolAddress: data.poolId || "",
+      poolType: data.poolType || "",
+    }))
+
+    // Verify pools via Helius (checks for BonkFun program involvement)
+    const verifiedMints = await verifyPoolsViaBonkFun(poolsToVerify)
+
     for (const [mint, data] of raydiumPools) {
-      const poolType = (data.poolType || "").toLowerCase()
-      const isLikelyBonkFun = poolType.includes("cpmm") ||
-                              poolType.includes("launchlab") ||
-                              poolType === "standard"
-      if (isLikelyBonkFun) {
-        verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true, verifiedBy: "pool-type-heuristic" })
+      if (verifiedMints.has(mint)) {
+        verifiedRaydiumPools.set(mint, { ...data, isBonkFun: true, verifiedBy: "helius-onchain" })
       }
     }
-    console.log(`[API] Pool-type fallback: ${verifiedRaydiumPools.size}/${raydiumPools.size} tokens matched (may include non-BonkFun)`)
+    console.log(`[API] Helius verification: ${verifiedRaydiumPools.size}/${raydiumPools.size} confirmed BonkFun tokens`)
   }
 
   // The verified BonkFun mints from Raydium pools
