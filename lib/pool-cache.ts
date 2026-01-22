@@ -273,7 +273,8 @@ export async function getCachedEnrichedTokens(): Promise<{ tokens: any[]; timest
   // Check memory first
   if (memoryCache.enrichedTokens &&
       Date.now() - memoryCache.enrichedTokens.timestamp < CACHE_TTL.ENRICHED_TOKENS) {
-    return memoryCache.enrichedTokens
+    // Return in expected format { tokens, timestamp }
+    return { tokens: memoryCache.enrichedTokens.data, timestamp: memoryCache.enrichedTokens.timestamp }
   }
 
   // Try KV
@@ -336,7 +337,7 @@ export async function getCacheStats(): Promise<{
     poolCache: {
       hit: !!pools,
       age: pools ? Date.now() - pools.discoveredAt : null,
-      count: pools?.pools.length || 0,
+      count: pools?.tokenMints.length || 0,
     },
     metadataCache: {
       count: memoryCache.tokenMetadata.size,
