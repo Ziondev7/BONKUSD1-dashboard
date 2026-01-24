@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BONKUSD1 Dashboard - Technical Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #1a1a2e;
+            background: #ffffff;
+            padding: 40px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #0f0f23;
+            border-bottom: 3px solid #f7931a;
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            font-size: 20px;
+            color: #1a1a2e;
+            margin-top: 35px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        h3 {
+            font-size: 16px;
+            color: #333;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        p {
+            margin-bottom: 12px;
+            color: #444;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 14px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px 12px;
+            text-align: left;
+        }
+
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+
+        tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 13px;
+            color: #d63384;
+        }
+
+        pre {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            page-break-inside: avoid;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #fff9e6 0%, #fff3cd 100%);
+            border-left: 4px solid #f7931a;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        ul {
+            margin: 10px 0 15px 25px;
+        }
+
+        li {
+            margin-bottom: 6px;
+            color: #444;
+        }
+
+        .header-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .flow-diagram {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 12px;
+            white-space: pre;
+            overflow-x: auto;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-primary {
+            background: #0066cc;
+            color: white;
+        }
+
+        .badge-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .badge-warning {
+            background: #f7931a;
+            color: white;
+        }
+
+        @media print {
+            body {
+                padding: 20px;
+            }
+
+            .section {
+                page-break-inside: avoid;
+            }
+
+            h2 {
+                page-break-after: avoid;
+            }
+
+            pre, table {
+                page-break-inside: avoid;
+            }
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .toc h3 {
+            margin-bottom: 15px;
+            color: #1a1a2e;
+        }
+
+        .toc ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .toc li {
+            padding: 5px 0;
+            border-bottom: 1px dotted #ddd;
+        }
+
+        .toc li:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-info">
+        <span>BONKUSD1 Dashboard - Technical Documentation</span>
+        <span>Generated: January 2026</span>
+    </div>
+
+    <h1>BONKUSD1 Dashboard Documentation</h1>
+
+    <div class="toc">
+        <h3>Table of Contents</h3>
+        <ul>
+            <li>1. Tech Stack & Overview</li>
+            <li>2. Data Sources</li>
+            <li>3. API Endpoints</li>
+            <li>4. Cache Strategy</li>
+            <li>5. Main Components</li>
+            <li>6. Data Flow Architecture</li>
+            <li>7. Safety Scoring System</li>
+            <li>8. Key Configuration</li>
+            <li>9. Project Structure</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>1. Tech Stack & Overview</h2>
+        <p>The BONKUSD1 Dashboard is a real-time cryptocurrency tracking application that monitors BonkFun tokens paired with USD1 stablecoin on the Solana blockchain.</p>
+
+        <table>
+            <tr>
+                <th>Technology</th>
+                <th>Version</th>
+                <th>Purpose</th>
+            </tr>
+            <tr>
+                <td>Next.js</td>
+                <td>15.0.7</td>
+                <td>App Router architecture with API routes and Edge runtime</td>
+            </tr>
+            <tr>
+                <td>React</td>
+                <td>19</td>
+                <td>Client-side UI and state management</td>
+            </tr>
+            <tr>
+                <td>TypeScript</td>
+                <td>5</td>
+                <td>Type safety across the codebase</td>
+            </tr>
+            <tr>
+                <td>SWR</td>
+                <td>2.3.8</td>
+                <td>Data fetching with stale-while-revalidate pattern</td>
+            </tr>
+            <tr>
+                <td>TailwindCSS</td>
+                <td>4.1.9</td>
+                <td>Utility-first styling</td>
+            </tr>
+            <tr>
+                <td>Framer Motion</td>
+                <td>12.26.2</td>
+                <td>Smooth animations and transitions</td>
+            </tr>
+            <tr>
+                <td>Radix UI</td>
+                <td>Latest</td>
+                <td>Accessible component primitives</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>2. Data Sources</h2>
+        <p>The dashboard fetches data from multiple sources in parallel to ensure reliability and comprehensive coverage:</p>
+
+        <table>
+            <tr>
+                <th>Source</th>
+                <th>Purpose</th>
+                <th>Priority</th>
+            </tr>
+            <tr>
+                <td><strong>Raydium API v3</strong></td>
+                <td>Primary source for BonkFun pool identification (LaunchLab/CPMM pools)</td>
+                <td><span class="badge badge-primary">Primary</span></td>
+            </tr>
+            <tr>
+                <td><strong>DexScreener API</strong></td>
+                <td>Price, liquidity, volume, transaction data, social links</td>
+                <td><span class="badge badge-success">Secondary</span></td>
+            </tr>
+            <tr>
+                <td><strong>GeckoTerminal API</strong></td>
+                <td>Fallback pool data, price change metrics, FDV</td>
+                <td><span class="badge badge-warning">Fallback</span></td>
+            </tr>
+            <tr>
+                <td><strong>Birdeye WebSocket</strong></td>
+                <td>Real-time price updates (optional, client-side)</td>
+                <td>Optional</td>
+            </tr>
+        </table>
+
+        <div class="highlight-box">
+            <strong>BonkFun Token Verification:</strong> All tokens are verified through Raydium's LaunchLab/CPMM pool types and the BONKFUN_PLATFORM_CONFIG in accounts. Only verified BonkFun tokens are displayed.
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>3. API Endpoints</h2>
+
+        <table>
+            <tr>
+                <th>Route</th>
+                <th>Method</th>
+                <th>Purpose</th>
+                <th>Cache TTL</th>
+            </tr>
+            <tr>
+                <td><code>/api/tokens</code></td>
+                <td>GET</td>
+                <td>Main token data fetch</td>
+                <td>15s fresh, 45s stale</td>
+            </tr>
+            <tr>
+                <td><code>/api/tokens?force=true</code></td>
+                <td>GET</td>
+                <td>Force cache bypass</td>
+                <td>None</td>
+            </tr>
+            <tr>
+                <td><code>/api/volume-history</code></td>
+                <td>GET</td>
+                <td>Historical volume data</td>
+                <td>3 minutes</td>
+            </tr>
+            <tr>
+                <td><code>/api/cron/volume-snapshot</code></td>
+                <td>GET</td>
+                <td>Hourly volume snapshot (cron)</td>
+                <td>N/A</td>
+            </tr>
+        </table>
+
+        <h3>Main API Flow (<code>/api/tokens</code>)</h3>
+        <div class="flow-diagram">1. Check in-memory cache (15s TTL)
+2. If stale -> return cached + fetch fresh in background
+3. If expired -> parallel fetch from all sources:
+   ├── Raydium: Get USD1 pair pools
+   ├── DexScreener: Get price/volume/social
+   └── GeckoTerminal: Get FDV/transactions
+4. Filter to ONLY BonkFun-verified tokens
+5. Merge data, calculate safety scores
+6. Sort by market cap and return</div>
+    </div>
+
+    <div class="section">
+        <h2>4. Cache Strategy</h2>
+        <p>Multi-layer caching ensures fast responses and reduces API load:</p>
+
+        <table>
+            <tr>
+                <th>Layer</th>
+                <th>TTL</th>
+                <th>Purpose</th>
+            </tr>
+            <tr>
+                <td>Memory Cache</td>
+                <td>15 seconds</td>
+                <td>Immediate server response</td>
+            </tr>
+            <tr>
+                <td>Stale-While-Revalidate</td>
+                <td>45 seconds</td>
+                <td>Serve stale data while fetching fresh</td>
+            </tr>
+            <tr>
+                <td>LocalStorage</td>
+                <td>5 minutes</td>
+                <td>Browser-side cache for offline UX</td>
+            </tr>
+            <tr>
+                <td>BonkFun Verification</td>
+                <td>24 hours</td>
+                <td>Token origin verification cache</td>
+            </tr>
+            <tr>
+                <td>API Health Tracking</td>
+                <td>Dynamic</td>
+                <td>Exponential backoff (30s - 5min)</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>5. Main Components</h2>
+
+        <table>
+            <tr>
+                <th>Component</th>
+                <th>Location</th>
+                <th>Purpose</th>
+            </tr>
+            <tr>
+                <td><strong>BonkDashboard</strong></td>
+                <td><code>/components/bonk-dashboard.tsx</code></td>
+                <td>Central controller - orchestrates all data and state</td>
+            </tr>
+            <tr>
+                <td><strong>MetricsGrid</strong></td>
+                <td><code>/components/dashboard/metrics-grid.tsx</code></td>
+                <td>Displays pair count, 24h volume, liquidity, market cap</td>
+            </tr>
+            <tr>
+                <td><strong>TokenTable</strong></td>
+                <td><code>/components/dashboard/token-table.tsx</code></td>
+                <td>Paginated token list with live price indicators</td>
+            </tr>
+            <tr>
+                <td><strong>TokenFilters</strong></td>
+                <td><code>/components/dashboard/token-filters.tsx</code></td>
+                <td>Search, sort, quick filters, thresholds</td>
+            </tr>
+            <tr>
+                <td><strong>VolumeEvolution</strong></td>
+                <td><code>/components/dashboard/volume-evolution.tsx</code></td>
+                <td>Area chart showing volume over time</td>
+            </tr>
+            <tr>
+                <td><strong>TopPerformers</strong></td>
+                <td><code>/components/dashboard/top-performers.tsx</code></td>
+                <td>Top gainers/losers carousel</td>
+            </tr>
+            <tr>
+                <td><strong>TokenDetailDrawer</strong></td>
+                <td><code>/components/dashboard/token-detail-drawer.tsx</code></td>
+                <td>Side panel with detailed token info</td>
+            </tr>
+            <tr>
+                <td><strong>FloatingNav</strong></td>
+                <td><code>/components/dashboard/floating-nav.tsx</code></td>
+                <td>Top status bar with refresh and live status</td>
+            </tr>
+        </table>
+
+        <h3>Custom Hooks</h3>
+        <table>
+            <tr>
+                <th>Hook</th>
+                <th>Purpose</th>
+            </tr>
+            <tr>
+                <td><code>useTokens()</code></td>
+                <td>Primary data fetching hook - fetches every 10 seconds</td>
+            </tr>
+            <tr>
+                <td><code>useFavorites()</code></td>
+                <td>Manages bookmarked tokens in localStorage</td>
+            </tr>
+            <tr>
+                <td><code>useDataFreshness()</code></td>
+                <td>Tracks data staleness (30s stale, 2min critical)</td>
+            </tr>
+            <tr>
+                <td><code>useNewPoolDetection()</code></td>
+                <td>Detects newly launched tokens</td>
+            </tr>
+            <tr>
+                <td><code>useRealtime()</code></td>
+                <td>WebSocket price updates</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>6. Data Flow Architecture</h2>
+
+        <div class="flow-diagram">                           /api/tokens (Edge Runtime)
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+                Raydium       DexScreener     GeckoTerminal
+                   │               │               │
+                   └───────────────┼───────────────┘
+                                   ▼
+                         Merge & Filter Data
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │      SWR Hook (useTokens)    │
+                    │   Refreshes every 10 seconds │
+                    └──────────────┬───────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │       BonkDashboard          │
+                    │  (Filter, Sort, Paginate)    │
+                    └──────────────┬───────────────┘
+                                   │
+          ┌────────────┬───────────┼───────────┬────────────┐
+          ▼            ▼           ▼           ▼            ▼
+     MetricsGrid  TokenTable  TopPerformers  Filters  VolumeChart</div>
+
+        <div class="info-box">
+            <strong>State Management:</strong> The dashboard uses React's built-in state management with SWR for server state. LocalStorage is used for persistent user preferences (favorites, sound settings).
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>7. Safety Scoring System</h2>
+        <p>Each token receives a safety score (0-100) based on multiple risk factors:</p>
+
+        <table>
+            <tr>
+                <th>Factor</th>
+                <th>Max Points</th>
+                <th>Criteria</th>
+            </tr>
+            <tr>
+                <td>Liquidity</td>
+                <td>30 points</td>
+                <td>$50k+ = 30pts, scales down linearly</td>
+            </tr>
+            <tr>
+                <td>Liquidity/MCap Ratio</td>
+                <td>20 points</td>
+                <td>10%+ ratio = 20pts</td>
+            </tr>
+            <tr>
+                <td>Trading Activity</td>
+                <td>20 points</td>
+                <td>100+ transactions = 20pts</td>
+            </tr>
+            <tr>
+                <td>Buy/Sell Balance</td>
+                <td>15 points</td>
+                <td>35-65% buy ratio = 15pts</td>
+            </tr>
+            <tr>
+                <td>Token Age</td>
+                <td>10 points</td>
+                <td>72h+ = 10pts</td>
+            </tr>
+            <tr>
+                <td>Social Presence</td>
+                <td>5 points</td>
+                <td>Twitter/Telegram/Website presence</td>
+            </tr>
+        </table>
+
+        <h3>Safety Level Classification</h3>
+        <table>
+            <tr>
+                <th>Score Range</th>
+                <th>Classification</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td>70-100</td>
+                <td><span class="badge badge-success">Safe</span></td>
+                <td>Minimal risk indicators</td>
+            </tr>
+            <tr>
+                <td>40-69</td>
+                <td><span class="badge badge-warning">Caution</span></td>
+                <td>Some warning flags present</td>
+            </tr>
+            <tr>
+                <td>0-39</td>
+                <td><span class="badge" style="background:#dc3545;color:white">Risky</span></td>
+                <td>Multiple risk factors detected</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>8. Key Configuration</h2>
+
+        <h3>Token Filtering</h3>
+        <table>
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>USD1 Mint Address</td>
+                <td><code>USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB</code></td>
+            </tr>
+            <tr>
+                <td>Excluded Symbols</td>
+                <td>WLFI, USD1, USDC, USDT, SOL, WSOL, RAY, FREYA, REAL, AOL</td>
+            </tr>
+            <tr>
+                <td>Max MCap/Liquidity Ratio</td>
+                <td>100x</td>
+            </tr>
+            <tr>
+                <td>Minimum Liquidity</td>
+                <td>$100 USD</td>
+            </tr>
+        </table>
+
+        <h3>Refresh Rates & Timing</h3>
+        <table>
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>Dashboard Data Refresh</td>
+                <td>10 seconds</td>
+            </tr>
+            <tr>
+                <td>Countdown Timer</td>
+                <td>Every 1 second</td>
+            </tr>
+            <tr>
+                <td>Stale Data Warning</td>
+                <td>30 seconds</td>
+            </tr>
+            <tr>
+                <td>Critical Stale Threshold</td>
+                <td>2 minutes</td>
+            </tr>
+        </table>
+
+        <h3>Performance Tuning</h3>
+        <table>
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>Tokens Per Page</td>
+                <td>50</td>
+            </tr>
+            <tr>
+                <td>Raydium Page Size</td>
+                <td>500</td>
+            </tr>
+            <tr>
+                <td>DexScreener Batch Size</td>
+                <td>30</td>
+            </tr>
+            <tr>
+                <td>GeckoTerminal Max Pages</td>
+                <td>5</td>
+            </tr>
+            <tr>
+                <td>LocalStorage Cache TTL</td>
+                <td>5 minutes</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>9. Project Structure</h2>
+
+        <div class="flow-diagram">/app
+  /api
+    /tokens              # Main token data endpoint
+    /volume              # Volume tracking endpoints
+    /volume-history      # Historical volume data
+    /cron                # Scheduled tasks (hourly snapshots)
+  /page.tsx              # Root dashboard component
+  /layout.tsx            # Global layout with metadata
+  /globals.css           # Global styles
+
+/components
+  /bonk-dashboard.tsx    # Main dashboard controller
+  /dashboard             # Feature-specific components
+    - metrics-grid.tsx
+    - token-table.tsx
+    - token-filters.tsx
+    - floating-nav.tsx
+    - token-detail-drawer.tsx
+    - volume-evolution.tsx
+    - top-performers.tsx
+    - realtime-indicators.tsx
+  /ui                    # Radix UI wrapper components
+
+/hooks
+  /use-tokens.ts         # Primary data fetching hook
+  /use-realtime.ts       # WebSocket price updates
+  /use-mobile.ts         # Mobile responsive utilities
+
+/lib
+  /types.ts              # TypeScript interfaces
+  /utils.ts              # Formatting, parsing, utilities
+  /volume-store.ts       # Volume snapshot storage layer</div>
+    </div>
+
+    <div class="section" style="margin-top: 50px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+        <p style="text-align: center; color: #666; font-size: 12px;">
+            BONKUSD1 Dashboard Technical Documentation<br>
+            Generated January 2026
+        </p>
+    </div>
+</body>
+</html>
