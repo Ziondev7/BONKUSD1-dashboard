@@ -19,13 +19,10 @@ export interface Token {
   txns24h: number
   buys24h: number
   sells24h: number
+  holders?: number
   twitter: string | null
   telegram: string | null
   website: string | null
-  // Safety metrics
-  safetyScore: number
-  safetyLevel: 'safe' | 'caution' | 'risky'
-  safetyWarnings: string[]
   // Real-time tracking
   prevPrice?: number
   priceDirection?: 'up' | 'down' | 'neutral'
@@ -72,12 +69,29 @@ export interface MetricsSnapshot {
   losersCount: number
   avgChange24h: number
   timestamp: number
+  raydiumTotalVolume?: number
 }
 
 export interface ApiHealth {
-  raydium: boolean
+  raydium?: boolean
   dexscreener: boolean
   geckoterminal: boolean
+  onchain?: boolean // v2 API on-chain discovery health
+}
+
+export interface RpcHealth {
+  [key: string]: {
+    healthy: boolean
+    errorCount: number
+    requestCount: number
+  }
+}
+
+export interface CacheStats {
+  poolCache: { hit: boolean; age: number | null; count: number }
+  metadataCache: { count: number }
+  enrichedCache: { hit: boolean; age: number | null; count: number }
+  storage: 'vercel-kv' | 'memory'
 }
 
 export interface ApiResponse {
@@ -88,4 +102,10 @@ export interface ApiResponse {
   age?: number
   health?: ApiHealth
   error?: string
+  raydiumTotalVolume?: number
+  // v2 API specific fields
+  discovery?: 'on-chain' | 'api'
+  version?: 'v1' | 'v2'
+  rpcHealth?: RpcHealth
+  cacheStats?: CacheStats
 }

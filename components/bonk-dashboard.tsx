@@ -4,18 +4,19 @@ import { useState, useCallback, useMemo, useRef, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import dynamic from "next/dynamic"
 import { useTokens, useFavorites, useSoundPreference } from "@/hooks/use-tokens"
-import { useDataFreshness, useNewPoolDetection } from "@/hooks/use-realtime"
+// import { useDataFreshness, useNewPoolDetection } from "@/hooks/use-realtime"
 import { ErrorBoundary } from "@/components/error-boundary"
-import { sanitizeSearchInput } from "@/lib/utils"
+import { sanitizeSearchInput, formatNumber } from "@/lib/utils"
 import { MetricsGrid } from "./dashboard/metrics-grid"
-import { StaleDataBanner, NewPoolNotification } from "./dashboard/realtime-indicators"
+import { VolumeAnalytics } from "./dashboard/volume-analytics"
+// import { StaleDataBanner, NewPoolNotification } from "./dashboard/realtime-indicators"
 
 // Dynamic import FloatingNav with SSR disabled to prevent hydration mismatch
 // (status indicator depends on client-side data fetching)
 const FloatingNav = dynamic(() => import("./dashboard/floating-nav").then(mod => ({ default: mod.FloatingNav })), {
   ssr: false,
 })
-import { VolumeEvolution } from "./dashboard/volume-evolution"
+// import { VolumeEvolution } from "./dashboard/volume-evolution"
 import { TopPerformers } from "./dashboard/top-performers"
 import { TokenFilters } from "./dashboard/token-filters"
 import { TokenTable } from "./dashboard/token-table"
@@ -28,29 +29,20 @@ import type { Token, BannerState } from "@/lib/types"
 
 const TOKENS_PER_PAGE = 50
 
-export function BonkDashboard() {
+interface BonkDashboardProps {
+  initialTokens?: Token[] | null
+}
+
+export function BonkDashboard({ initialTokens }: BonkDashboardProps) {
   // Custom hooks for data fetching
   const { enabled: soundEnabled, toggle: toggleSound } = useSoundPreference()
   const { tokens, isLoading, status, metrics, lastRefresh, refresh, apiHealth } = useTokens({
     refreshInterval: 10000, // 10 seconds for blazing fast updates
     enableSound: soundEnabled,
+    initialData: initialTokens || undefined,
   })
   const { favorites, toggleFavorite, count: favoritesCount } = useFavorites()
 
-  // Real-time enhancement hooks
-  const freshness = useDataFreshness({
-    lastUpdate: lastRefresh,
-    staleThresholdMs: 30 * 1000, // 30 seconds
-    criticalThresholdMs: 2 * 60 * 1000, // 2 minutes
-  })
-
-  const { newPools, hasNewPools, clearNewPools, dismissPool } = useNewPoolDetection({
-    enabled: true,
-    currentTokens: tokens.map(t => ({ address: t.address, symbol: t.symbol, name: t.name })),
-    onNewPool: (pool) => {
-      console.log(`[Dashboard] New pool detected: ${pool.symbol}`)
-    },
-  })
 
   // Refresh countdown state
   const [nextRefreshIn, setNextRefreshIn] = useState(10)
@@ -82,7 +74,13 @@ export function BonkDashboard() {
   const [activeTab, setActiveTab] = useState("all")
   const [minVolume, setMinVolume] = useState(0)
   const [minLiquidity, setMinLiquidity] = useState(0)
+  const [proMode, setProMode] = useState(false)
   const tokenTableRef = useRef<HTMLDivElement>(null)
+
+  // Pro Mode toggle
+  const toggleProMode = useCallback(() => {
+    setProMode(prev => !prev)
+  }, [])
 
   // Handlers
   const handleSelectToken = useCallback((token: Token) => {
@@ -238,20 +236,31 @@ export function BonkDashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
+      {/* Animated Grid Background */}
+      <div className="animated-grid-bg" aria-hidden="true" />
+
+      {/* Floating Particles */}
+      <div className="particles-container" aria-hidden="true">
+        <div className="particle" style={{ left: '5%', animationDelay: '0s' }} />
+        <div className="particle" style={{ left: '15%', animationDelay: '3s' }} />
+        <div className="particle" style={{ left: '25%', animationDelay: '1s' }} />
+        <div className="particle" style={{ left: '35%', animationDelay: '4s' }} />
+        <div className="particle" style={{ left: '45%', animationDelay: '2s' }} />
+        <div className="particle" style={{ left: '55%', animationDelay: '5s' }} />
+        <div className="particle" style={{ left: '65%', animationDelay: '1.5s' }} />
+        <div className="particle" style={{ left: '75%', animationDelay: '3.5s' }} />
+        <div className="particle" style={{ left: '85%', animationDelay: '2.5s' }} />
+        <div className="particle" style={{ left: '95%', animationDelay: '4.5s' }} />
+      </div>
+
       {/* Grain texture overlay */}
       <div className="grain-overlay" aria-hidden="true" />
 
-      {/* Animated mesh gradient background */}
+      {/* Animated mesh gradient background - Gradient Glass Purple/Pink */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
-        <div className="absolute top-0 left-1/4 w-[900px] h-[900px] bg-[radial-gradient(ellipse_at_center,_rgba(250,204,21,0.08)_0%,_transparent_60%)] mesh-gradient" />
-        <div
-          className="absolute top-1/3 right-0 w-[700px] h-[700px] bg-[radial-gradient(ellipse_at_center,_rgba(0,255,136,0.05)_0%,_transparent_60%)] mesh-gradient"
-          style={{ animationDelay: "-10s" }}
-        />
-        <div
-          className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[radial-gradient(ellipse_at_center,_rgba(250,204,21,0.05)_0%,_transparent_60%)] mesh-gradient"
-          style={{ animationDelay: "-20s" }}
-        />
+        <div className="absolute top-0 left-1/4 w-[900px] h-[900px] bg-[radial-gradient(ellipse_at_center,_rgba(168,85,247,0.12)_0%,_transparent_60%)] blob-float" />
+        <div className="absolute top-1/3 right-0 w-[700px] h-[700px] bg-[radial-gradient(ellipse_at_center,_rgba(236,72,153,0.08)_0%,_transparent_60%)] blob-float-reverse" />
+        <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[radial-gradient(ellipse_at_center,_rgba(168,85,247,0.06)_0%,_transparent_60%)] blob-float-slow" />
       </div>
 
       {/* Floating Navigation */}
@@ -267,83 +276,301 @@ export function BonkDashboard() {
         onScrollToContent={handleScrollToContent}
         activeFiltersCount={activeFiltersCount}
         totalVolume={metrics.totalVolume}
+        proMode={proMode}
+        onToggleProMode={toggleProMode}
       />
 
       {/* Main Content */}
-      <main className="relative z-10 max-w-[1600px] mx-auto px-4 md:px-6 py-6 pt-36">
+      <main className={`relative z-10 mx-auto px-4 md:px-6 ${
+        proMode
+          ? "h-[calc(100vh-140px)] pt-36 max-w-full overflow-hidden"
+          : "max-w-[1600px] py-6 pt-44"
+      }`}>
         <ErrorBoundary>
-          {/* Stale Data Warning */}
-          <AnimatePresence>
-            {freshness.isStale && (
-              <StaleDataBanner
-                freshness={freshness}
-                onRefresh={refresh}
-                className="mb-4"
-              />
-            )}
-          </AnimatePresence>
 
           {/* Error Banner */}
           {banner && (
             <InfoBanner banner={banner} onDismiss={() => setBanner(null)} />
           )}
 
-          {/* Metrics Grid */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} />
-          </motion.div>
+          {proMode ? (
+            /* PRO MODE LAYOUT - Expansive Dashboard (Layout 1 V2) */
+            <div className="h-full flex gap-0">
+              {/* Left: Expansive Data Cards Panel */}
+              <div className="flex-1 h-full flex flex-col overflow-hidden pr-0" style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.02) 0%, transparent 100%)' }}>
+                {/* 4-Column Metrics Grid */}
+                <div className="flex-shrink-0 p-4 pb-3">
+                  <div className="grid grid-cols-4 gap-3">
+                    {[
+                      { label: "USD1 PAIRS", value: metrics.tokenCount.toString(), icon: "📊" },
+                      { label: "24H VOLUME", value: formatNumber(metrics.totalVolume), icon: "📈" },
+                      { label: "LIQUIDITY", value: formatNumber(metrics.totalLiquidity), icon: "💧" },
+                      { label: "MARKET CAP", value: formatNumber(metrics.totalMcap), icon: "💎" },
+                    ].map((metric, i) => (
+                      <div
+                        key={metric.label}
+                        className="bg-[rgba(20,15,35,0.8)] border border-[rgba(168,85,247,0.2)] rounded-lg p-4 text-center"
+                      >
+                        <p className="text-2xl font-bold font-mono text-white tabular-nums">
+                          {isLoading ? (
+                            <span className="inline-block w-16 h-6 bg-white/[0.06] rounded animate-pulse" />
+                          ) : (
+                            metric.value
+                          )}
+                        </p>
+                        <p className="text-[9px] text-white/40 font-mono uppercase tracking-wider mt-1">
+                          {metric.label}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-          {/* Volume Evolution Chart */}
-          <VolumeEvolution currentVolume={metrics.totalVolume} />
+                {/* Two-Column Section: Performers + Movers */}
+                <div className="flex-1 overflow-hidden grid grid-cols-2 gap-4 px-4 pb-4">
+                  {/* Left Column: Top Performers List */}
+                  <div className="bg-[rgba(20,15,35,0.6)] border border-[rgba(168,85,247,0.2)] rounded-lg overflow-hidden flex flex-col">
+                    <div className="px-4 py-3 bg-gradient-to-r from-[rgba(168,85,247,0.15)] to-[rgba(236,72,153,0.08)] border-b border-[rgba(168,85,247,0.2)] flex items-center gap-2">
+                      <span>👑</span>
+                      <span className="text-xs font-bold text-white">TOP BY MARKET CAP</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto scrollbar-hide">
+                      {tokens.slice(0, 5).map((token, i) => {
+                        const isPositive = token.change24h >= 0
+                        return (
+                          <div
+                            key={token.id}
+                            onClick={() => handleSelectToken(token)}
+                            className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.03] cursor-pointer transition-colors hover:bg-[rgba(168,85,247,0.05)]"
+                          >
+                            <span className={`w-6 h-6 flex items-center justify-center text-xs font-bold font-mono rounded-md ${
+                              i === 0
+                                ? "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white"
+                                : "bg-white/[0.05] text-white/50"
+                            }`}>
+                              {i + 1}
+                            </span>
+                            <div className="w-9 h-9 rounded-lg bg-[rgba(168,85,247,0.15)] border border-white/10 overflow-hidden flex items-center justify-center text-lg flex-shrink-0">
+                              {token.imageUrl ? (
+                                <img src={token.imageUrl} alt={token.name} className="w-full h-full object-cover" />
+                              ) : (
+                                token.emoji
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-white truncate">{token.name}</p>
+                              <p className="text-xs text-white/40 font-mono">{formatNumber(token.mcap)}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <span className={`text-sm font-mono font-semibold ${isPositive ? "text-success" : "text-danger"}`}>
+                                {isPositive ? "+" : ""}{token.change24h.toFixed(1)}%
+                              </span>
+                              <p className="text-[10px] text-white/30 font-mono">{formatNumber(token.volume24h)}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
 
-          {/* Top Performers */}
-          <TopPerformers
-            tokens={tokens.slice(0, 3)}
-            topGainers={topGainers}
-            topLosers={topLosers}
-            onSelectToken={handleSelectToken}
-          />
+                  {/* Right Column: Gainers + Losers stacked */}
+                  <div className="flex flex-col gap-4">
+                    {/* Top Gainers Card */}
+                    <div className="flex-1 bg-[rgba(20,15,35,0.6)] border border-[rgba(168,85,247,0.2)] rounded-lg overflow-hidden flex flex-col">
+                      <div className="px-4 py-2.5 bg-[rgba(168,85,247,0.05)] border-b border-[rgba(168,85,247,0.15)] flex items-center gap-2">
+                        <span className="text-success">📈</span>
+                        <span className="text-[10px] font-mono text-white/50 uppercase tracking-wider">TOP GAINERS</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-hide">
+                        {topGainers.slice(0, 4).map((token, i) => (
+                          <div
+                            key={`g-${token.id}`}
+                            onClick={() => handleSelectToken(token)}
+                            className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.02] cursor-pointer hover:bg-success/5 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-white/30">{i + 1}</span>
+                              <span className="text-sm font-medium text-white">{token.symbol}</span>
+                            </div>
+                            <span className="text-sm font-mono font-bold text-success">
+                              +{token.change24h.toFixed(1)}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
 
-          {/* Token Table Section */}
-          <div ref={tokenTableRef} className="scroll-mt-32">
-            <TokenFilters
-              sortBy={sortBy}
-              onSortChange={(v) => handleFilterChange(setSortBy, v)}
-              searchQuery={searchQuery}
-              onSearchChange={handleSearchChange}
-              quickFilter={quickFilter}
-              onQuickFilterChange={(v) => handleFilterChange(setQuickFilter, v)}
-              showFavoritesOnly={showFavoritesOnly}
-              onToggleFavorites={() => handleFilterChange(setShowFavoritesOnly, !showFavoritesOnly)}
-              favoritesCount={favoritesCount}
-              minVolume={minVolume}
-              onMinVolumeChange={(v) => handleFilterChange(setMinVolume, v)}
-              minLiquidity={minLiquidity}
-              onMinLiquidityChange={(v) => handleFilterChange(setMinLiquidity, v)}
-            />
+                    {/* Top Losers Card */}
+                    <div className="flex-1 bg-[rgba(20,15,35,0.6)] border border-[rgba(168,85,247,0.2)] rounded-lg overflow-hidden flex flex-col">
+                      <div className="px-4 py-2.5 bg-[rgba(168,85,247,0.05)] border-b border-[rgba(168,85,247,0.15)] flex items-center gap-2">
+                        <span className="text-danger">📉</span>
+                        <span className="text-[10px] font-mono text-white/50 uppercase tracking-wider">TOP LOSERS</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-hide">
+                        {topLosers.slice(0, 4).map((token, i) => (
+                          <div
+                            key={`l-${token.id}`}
+                            onClick={() => handleSelectToken(token)}
+                            className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.02] cursor-pointer hover:bg-danger/5 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-white/30">{i + 1}</span>
+                              <span className="text-sm font-medium text-white">{token.symbol}</span>
+                            </div>
+                            <span className="text-sm font-mono font-bold text-danger">
+                              {token.change24h.toFixed(1)}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-            <TokenTable
-              tokens={paginatedTokens}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-              totalTokens={filteredTokens.length}
-              favorites={favorites}
-              onToggleFavorite={toggleFavorite}
-              sortBy={sortBy}
-              onSortChange={(v) => handleFilterChange(setSortBy, v)}
-              onSelectToken={handleSelectToken}
-              onOpenTradeModal={handleOpenTradeModal}
-              isLoading={isLoading}
-            />
-          </div>
+              {/* Right: Narrow Token Table Panel (340px) */}
+              <div className="w-[340px] flex-shrink-0 h-full flex flex-col border-l border-[rgba(168,85,247,0.15)]" style={{ background: 'rgba(10, 8, 18, 0.5)' }}>
+                {/* Search */}
+                <div className="p-3 border-b border-[rgba(168,85,247,0.15)]">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      placeholder="Search tokens..."
+                      className="w-full bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2.5 text-xs font-mono text-white placeholder:text-white/30 focus:outline-none focus:border-[#A855F7]/30"
+                    />
+                  </div>
+                </div>
 
-          {/* Footer */}
-          <DashboardFooter />
+                {/* Filter Chips */}
+                <div className="px-3 py-2 border-b border-[rgba(168,85,247,0.15)] flex gap-1.5 flex-wrap">
+                  {[
+                    { id: "all", label: "All" },
+                    { id: "gainers", label: "↑" },
+                    { id: "losers", label: "↓" },
+                    { id: "hot", label: "🔥" },
+                    { id: "new", label: "New" },
+                  ].map((filter) => (
+                    <button
+                      key={filter.id}
+                      onClick={() => handleFilterChange(setQuickFilter, filter.id)}
+                      className={`px-2.5 py-1 text-[9px] font-mono font-bold rounded transition-all ${
+                        quickFilter === filter.id
+                          ? "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white"
+                          : "bg-white/[0.03] border border-white/[0.06] text-white/50 hover:text-white"
+                      }`}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => handleFilterChange(setShowFavoritesOnly, !showFavoritesOnly)}
+                    className={`px-2.5 py-1 text-[9px] font-mono font-bold rounded transition-all ${
+                      showFavoritesOnly
+                        ? "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white"
+                        : "bg-white/[0.03] border border-white/[0.06] text-white/50 hover:text-white"
+                    }`}
+                  >
+                    ★
+                  </button>
+                </div>
+
+                {/* Compact Table */}
+                <div className="flex-1 overflow-hidden">
+                  <TokenTable
+                    tokens={paginatedTokens}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalTokens={filteredTokens.length}
+                    favorites={favorites}
+                    onToggleFavorite={toggleFavorite}
+                    sortBy={sortBy}
+                    onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                    onSelectToken={handleSelectToken}
+                    onOpenTradeModal={handleOpenTradeModal}
+                    isLoading={isLoading}
+                    proMode
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* NORMAL LAYOUT - Vertical scroll */
+            <>
+              {/* Metrics Grid */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+              >
+                <MetricsGrid metrics={metrics} tokens={tokens} isLoading={isLoading} />
+              </motion.div>
+
+              {/* Volume Analytics */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+                className="mt-8"
+              >
+                <VolumeAnalytics
+                  tokens={tokens}
+                  totalVolume={metrics.totalVolume}
+                  isLoading={isLoading}
+                  onSelectToken={handleSelectToken}
+                />
+              </motion.div>
+
+              {/* Top Performers */}
+              <div className="mt-6">
+                <TopPerformers
+                  tokens={tokens.slice(0, 3)}
+                  topGainers={topGainers}
+                  topLosers={topLosers}
+                  onSelectToken={handleSelectToken}
+                />
+              </div>
+
+              {/* Token Table Section */}
+              <div ref={tokenTableRef} className="scroll-mt-32">
+                <TokenFilters
+                  sortBy={sortBy}
+                  onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                  searchQuery={searchQuery}
+                  onSearchChange={handleSearchChange}
+                  quickFilter={quickFilter}
+                  onQuickFilterChange={(v) => handleFilterChange(setQuickFilter, v)}
+                  showFavoritesOnly={showFavoritesOnly}
+                  onToggleFavorites={() => handleFilterChange(setShowFavoritesOnly, !showFavoritesOnly)}
+                  favoritesCount={favoritesCount}
+                  minVolume={minVolume}
+                  onMinVolumeChange={(v) => handleFilterChange(setMinVolume, v)}
+                  minLiquidity={minLiquidity}
+                  onMinLiquidityChange={(v) => handleFilterChange(setMinLiquidity, v)}
+                />
+
+                <TokenTable
+                  tokens={paginatedTokens}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  totalTokens={filteredTokens.length}
+                  favorites={favorites}
+                  onToggleFavorite={toggleFavorite}
+                  sortBy={sortBy}
+                  onSortChange={(v) => handleFilterChange(setSortBy, v)}
+                  onSelectToken={handleSelectToken}
+                  onOpenTradeModal={handleOpenTradeModal}
+                  isLoading={isLoading}
+                />
+              </div>
+
+              {/* Footer */}
+              <DashboardFooter />
+            </>
+          )}
         </ErrorBoundary>
       </main>
 
@@ -365,16 +592,6 @@ export function BonkDashboard() {
       {/* Back to Top */}
       <BackToTop />
 
-      {/* New Pool Notifications */}
-      <AnimatePresence>
-        {hasNewPools && (
-          <NewPoolNotification
-            pools={newPools}
-            onDismiss={dismissPool}
-            onDismissAll={clearNewPools}
-          />
-        )}
-      </AnimatePresence>
     </div>
   )
 }

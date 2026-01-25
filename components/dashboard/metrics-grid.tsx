@@ -10,16 +10,17 @@ interface MetricsGridProps {
   metrics: MetricsSnapshot
   tokens: Token[]
   isLoading?: boolean
+  compact?: boolean
 }
 
-export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridProps) {
+export function MetricsGrid({ metrics, tokens, isLoading = false, compact = false }: MetricsGridProps) {
   const { marketSentiment, topMover } = useMemo(() => {
     if (tokens.length === 0) return { marketSentiment: 50, topMover: null }
-    
+
     const sentiment = (metrics.gainersCount / metrics.tokenCount) * 100
     const sorted = [...tokens].sort((a, b) => b.change24h - a.change24h)
     const topMover = sorted[0]
-    
+
     return { marketSentiment: sentiment || 50, topMover }
   }, [tokens, metrics])
 
@@ -66,10 +67,45 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
     },
   ]
 
+  // Compact layout for Pro Mode
+  if (compact) {
+    return (
+      <div className="glass-card-solid p-4 rounded-[2px_8px_2px_8px]">
+        <div className="grid grid-cols-2 gap-3">
+          {cards.map((card) => {
+            const Icon = card.icon
+            const colorClass = card.color === "bonk" ? "text-bonk" : "text-success"
+            const bgClass = card.color === "bonk" ? "bg-bonk/10" : "bg-success/10"
+
+            return (
+              <div key={card.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/[0.02]">
+                <div className={`p-1.5 rounded-md ${bgClass}`}>
+                  <Icon className={`w-3.5 h-3.5 ${colorClass}`} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white/40 text-[9px] font-mono tracking-wider uppercase truncate">
+                    {card.label}
+                  </p>
+                  <p className="text-lg font-bold font-mono text-white tabular-nums">
+                    {isLoading ? (
+                      <span className="inline-block w-16 h-5 bg-white/[0.06] rounded animate-pulse" />
+                    ) : (
+                      card.value
+                    )}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6 mb-10">
+    <div className="space-y-6 mb-14">
       {/* Main Metrics Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         {cards.map((card) => {
           const Icon = card.icon
           const colorClass = card.color === "bonk" ? "text-bonk" : "text-success"
@@ -81,7 +117,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: card.delay, duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
-              className="glass-card-solid p-5 card-hover group"
+              className="glass-card-solid p-6 card-hover card-depth gradient-border shimmer-effect group"
             >
               <div className="flex items-center gap-2.5 mb-3">
                 <div className={`p-2 rounded-lg ${bgClass} transition-transform group-hover:scale-110`}>
@@ -91,7 +127,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
                   {card.label}
                 </span>
               </div>
-              
+
               <p className="text-2xl md:text-3xl font-black font-mono text-white tracking-tight tabular-nums">
                 {isLoading ? (
                   <span className="inline-block w-24 h-8 bg-white/[0.06] rounded animate-pulse" />
@@ -99,7 +135,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
                   card.value
                 )}
               </p>
-              
+
               {card.subValue && (
                 <p className="text-white/30 text-xs font-mono mt-1.5 truncate">
                   {isLoading ? (
@@ -115,7 +151,7 @@ export function MetricsGrid({ metrics, tokens, isLoading = false }: MetricsGridP
       </div>
 
       {/* Market Sentiment Bar */}
-      
+
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { fetchHolderCountsBatch } from "@/lib/holder-fetcher"
 
 // ============================================
 // CONFIGURATION
@@ -33,12 +34,14 @@ interface CacheEntry {
   data: any[]
   timestamp: number
   isRefreshing: boolean
+  raydiumTotalVolume: number
 }
 
 let cache: CacheEntry = {
   data: [],
   timestamp: 0,
   isRefreshing: false,
+  raydiumTotalVolume: 0,
 }
 
 // ============================================
@@ -518,88 +521,6 @@ function getTokenEmoji(name?: string): string {
   return "🪙"
 }
 
-// Calculate token safety score based on multiple factors
-function calculateSafetyScore(token: {
-  liquidity: number
-  mcap: number
-  volume24h: number
-  txns24h: number
-  buys24h: number
-  sells24h: number
-  created: number | null
-  hasSocials: boolean
-}): { score: number; level: 'safe' | 'caution' | 'risky'; warnings: string[] } {
-  let score = 0
-  const warnings: string[] = []
-
-  // Input validation - detect suspicious metrics
-  if (token.liquidity > token.mcap * 10 && token.mcap > 0) {
-    warnings.push("Suspicious liquidity ratio")
-    score -= 15
-  }
-  
-  if (token.txns24h > 0 && token.volume24h > 0) {
-    const avgTxnSize = token.volume24h / token.txns24h
-    if (avgTxnSize < 0.5) {
-      warnings.push("Abnormal transaction pattern")
-      score -= 10
-    }
-  }
-
-  // Liquidity checks (max 30 points)
-  if (token.liquidity >= 50000) score += 30
-  else if (token.liquidity >= 10000) score += 20
-  else if (token.liquidity >= 5000) score += 10
-  else warnings.push("Low liquidity")
-
-  // Liquidity to market cap ratio (max 20 points)
-  const liqRatio = token.mcap > 0 ? (token.liquidity / token.mcap) * 100 : 0
-  if (liqRatio >= 10) score += 20
-  else if (liqRatio >= 5) score += 15
-  else if (liqRatio >= 2) score += 10
-  else warnings.push("Low liq/mcap ratio")
-
-  // Trading activity (max 20 points)
-  if (token.txns24h >= 100) score += 20
-  else if (token.txns24h >= 50) score += 15
-  else if (token.txns24h >= 20) score += 10
-  else if (token.txns24h < 10) warnings.push("Low trading activity")
-
-  // Buy/Sell balance (max 15 points) - healthy markets have balanced trading
-  const totalTxns = token.buys24h + token.sells24h
-  if (totalTxns > 0) {
-    const buyRatio = token.buys24h / totalTxns
-    if (buyRatio >= 0.35 && buyRatio <= 0.65) score += 15
-    else if (buyRatio >= 0.25 && buyRatio <= 0.75) score += 10
-    else warnings.push("Unbalanced buy/sell")
-  }
-
-  // Age check (max 10 points)
-  if (token.created) {
-    const ageHours = (Date.now() - token.created) / (1000 * 60 * 60)
-    if (ageHours >= 72) score += 10
-    else if (ageHours >= 24) score += 7
-    else if (ageHours >= 6) score += 4
-    else warnings.push("Very new token")
-  } else {
-    warnings.push("Unknown age")
-  }
-
-  // Social presence (max 5 points)
-  if (token.hasSocials) score += 5
-
-  // Ensure score doesn't go below 0
-  score = Math.max(0, score)
-
-  // Determine level
-  let level: 'safe' | 'caution' | 'risky'
-  if (score >= 70) level = 'safe'
-  else if (score >= 40) level = 'caution'
-  else level = 'risky'
-
-  return { score: Math.min(score, 100), level, warnings }
-}
-
 function extractSocialLinks(dexData: any): { twitter?: string; telegram?: string; website?: string } {
   const socials: { twitter?: string; telegram?: string; website?: string } = {}
   if (dexData?.info?.socials) {
@@ -717,24 +638,11 @@ async function fetchAllTokens(): Promise<any[]> {
     if (price <= 0) continue
 
     const socials = extractSocialLinks(dexData)
-    const hasSocials = !!(socials.twitter || socials.telegram || socials.website)
-    
+
     const txns24h = (dexData?.txns?.h24?.buys || 0) + (dexData?.txns?.h24?.sells || 0) || geckoData?.txns24h || 0
     const buys24h = dexData?.txns?.h24?.buys || geckoData?.buys24h || 0
     const sells24h = dexData?.txns?.h24?.sells || geckoData?.sells24h || 0
     const created = dexData?.pairCreatedAt || geckoData?.createdAt || null
-
-    // Calculate safety score
-    const safety = calculateSafetyScore({
-      liquidity,
-      mcap: fdv,
-      volume24h,
-      txns24h,
-      buys24h,
-      sells24h,
-      created,
-      hasSocials,
-    })
 
     tokens.push({
       id: id++,
@@ -760,10 +668,6 @@ async function fetchAllTokens(): Promise<any[]> {
       twitter: socials.twitter || null,
       telegram: socials.telegram || null,
       website: socials.website || null,
-      // Safety metrics
-      safetyScore: safety.score,
-      safetyLevel: safety.level,
-      safetyWarnings: safety.warnings,
       // BonkFun verification
       isBonkFun: true,
       poolType: raydiumData?.poolType || poolTypes.get(mint) || "unknown",
@@ -771,21 +675,123 @@ async function fetchAllTokens(): Promise<any[]> {
   }
 
   tokens.sort((a, b) => b.mcap - a.mcap)
+
+  // Fetch holder counts for top tokens
+  const holderFetchStart = Date.now()
+  try {
+    const topMints = tokens.slice(0, 50).map(t => t.address)
+    const holderCounts = await fetchHolderCountsBatch(topMints, 5)
+
+    for (const token of tokens) {
+      const holders = holderCounts.get(token.address)
+      if (holders !== undefined) {
+        token.holders = holders
+      }
+    }
+
+    console.log(`[API] Fetched holder counts for ${holderCounts.size} tokens in ${Date.now() - holderFetchStart}ms`)
+  } catch (error) {
+    console.warn('[API] Failed to fetch holder counts:', error)
+  }
+
   console.log(`[API] Completed in ${Date.now() - startTime}ms with ${tokens.length} tokens`)
-  
+
   return tokens
+}
+
+// ============================================
+// RAYDIUM TOTAL VOLUME FETCHER
+// ============================================
+
+/**
+ * Fetch total 24h volume across ALL USD1 pools from Raydium
+ * This is the source of truth for total ecosystem volume
+ */
+async function fetchRaydiumTotalVolume(): Promise<number> {
+  if (!isApiHealthy("raydium")) return 0
+
+  try {
+    const pageSize = 500
+    const maxPages = 5
+    let totalVolume = 0
+    const seenPools = new Set<string>()
+
+    // Fetch first page to get total count
+    const firstPageUrl = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
+    const firstResponse = await fetchWithTimeout(firstPageUrl)
+
+    if (!firstResponse.ok) {
+      console.error("[Raydium Total Volume] API error:", firstResponse.status)
+      return 0
+    }
+
+    const firstJson = await firstResponse.json()
+    if (!firstJson.success || !firstJson.data?.data) return 0
+
+    const processPool = (pool: any) => {
+      // Skip if we've already counted this pool
+      if (seenPools.has(pool.id)) return
+      seenPools.add(pool.id)
+
+      const mintA = pool.mintA?.address
+      const mintB = pool.mintB?.address
+      const isAUSD1 = mintA === CONFIG.USD1_MINT
+      const isBUSD1 = mintB === CONFIG.USD1_MINT
+
+      if (!isAUSD1 && !isBUSD1) return
+
+      const volume24h = pool.day?.volume || 0
+      totalVolume += volume24h
+    }
+
+    // Process first page
+    firstJson.data.data.forEach(processPool)
+
+    const totalCount = firstJson.data.count || firstJson.data.data.length
+    const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
+
+    // Fetch remaining pages in parallel
+    if (totalPages > 1 && firstJson.data.data.length >= pageSize) {
+      const pagePromises = []
+      for (let page = 2; page <= totalPages; page++) {
+        const url = `${CONFIG.RAYDIUM_API}/pools/info/mint?mint1=${CONFIG.USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
+        pagePromises.push(
+          fetchWithTimeout(url, 6000)
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null)
+        )
+      }
+
+      const results = await Promise.all(pagePromises)
+      results.forEach(json => {
+        if (json?.success && json.data?.data) {
+          json.data.data.forEach(processPool)
+        }
+      })
+    }
+
+    console.log(`[Raydium Total Volume] $${totalVolume.toLocaleString()} from ${seenPools.size} pools`)
+    return totalVolume
+  } catch (error) {
+    console.error("[Raydium Total Volume] Error:", error)
+    return 0
+  }
 }
 
 // Background refresh function
 async function refreshCache() {
   if (cache.isRefreshing) return
-  
+
   cache.isRefreshing = true
   try {
-    const tokens = await fetchAllTokens()
+    const [tokens, raydiumTotalVolume] = await Promise.all([
+      fetchAllTokens(),
+      fetchRaydiumTotalVolume(),
+    ])
     if (tokens.length > 0) {
       cache.data = tokens
       cache.timestamp = Date.now()
+      cache.raydiumTotalVolume = raydiumTotalVolume
     }
   } finally {
     cache.isRefreshing = false
@@ -814,6 +820,7 @@ export async function GET(request: Request) {
       cached: true,
       timestamp: cache.timestamp,
       age: cacheAge,
+      raydiumTotalVolume: cache.raydiumTotalVolume,
       health: {
         raydium: apiHealth.raydium.healthy,
         dexscreener: apiHealth.dexscreener.healthy,
@@ -826,13 +833,14 @@ export async function GET(request: Request) {
   if (hasCache && isStale && !forceRefresh) {
     // Trigger background refresh
     refreshCache()
-    
+
     return NextResponse.json({
       tokens: cache.data,
       cached: true,
       stale: true,
       timestamp: cache.timestamp,
       age: cacheAge,
+      raydiumTotalVolume: cache.raydiumTotalVolume,
       health: {
         raydium: apiHealth.raydium.healthy,
         dexscreener: apiHealth.dexscreener.healthy,
@@ -843,21 +851,22 @@ export async function GET(request: Request) {
 
   // Need fresh data
   try {
-    const tokens = await fetchAllTokens()
-    
+    // Fetch tokens and Raydium total volume in parallel
+    const [tokens, raydiumTotalVolume] = await Promise.all([
+      fetchAllTokens(),
+      fetchRaydiumTotalVolume(),
+    ])
+
     if (tokens.length > 0) {
       cache.data = tokens
       cache.timestamp = now
-      
-      // Record volume snapshot for history
-      const totalVolume = tokens.reduce((sum, t) => sum + (t.volume24h || 0), 0)
-      const totalLiquidity = tokens.reduce((sum, t) => sum + (t.liquidity || 0), 0)
-      const totalMcap = tokens.reduce((sum, t) => sum + (t.mcap || 0), 0)
-      
+      cache.raydiumTotalVolume = raydiumTotalVolume
+
       return NextResponse.json({
         tokens,
         cached: false,
         timestamp: now,
+        raydiumTotalVolume,
         health: {
           raydium: apiHealth.raydium.healthy,
           dexscreener: apiHealth.dexscreener.healthy,
@@ -872,6 +881,7 @@ export async function GET(request: Request) {
         tokens: cache.data,
         cached: true,
         timestamp: cache.timestamp,
+        raydiumTotalVolume: cache.raydiumTotalVolume,
         error: "Using cached data - fresh fetch returned empty",
         health: {
           raydium: apiHealth.raydium.healthy,
@@ -885,22 +895,24 @@ export async function GET(request: Request) {
       tokens: [],
       cached: false,
       timestamp: now,
+      raydiumTotalVolume: 0,
       error: "No data available",
     })
   } catch (error) {
     console.error("[API] Fatal error:", error)
-    
+
     if (hasCache) {
       return NextResponse.json({
         tokens: cache.data,
         cached: true,
         timestamp: cache.timestamp,
+        raydiumTotalVolume: cache.raydiumTotalVolume,
         error: "Using cached data due to error",
       })
     }
 
     return NextResponse.json(
-      { tokens: [], error: "Unable to fetch token data. Please try again later." },
+      { tokens: [], raydiumTotalVolume: 0, error: "Unable to fetch token data. Please try again later." },
       { status: 500 }
     )
   }

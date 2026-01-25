@@ -308,10 +308,9 @@ export function VolumeEvolution({ currentVolume }: VolumeEvolutionProps) {
     }
   )
 
-  // Use currentVolume from props for 24h period to match metrics grid
-  const displayVolume = period === "24h" && currentVolume 
-    ? currentVolume 
-    : (data?.stats.totalVolume || data?.stats.current || 0)
+  // Always use volume-history API's totalVolume as it comes from Raydium and is accurate
+  // The tokens API only sums enriched tokens which may be incomplete
+  const displayVolume = data?.stats.totalVolume || 0
 
   const isPositive = (data?.stats.change ?? 0) >= 0
 

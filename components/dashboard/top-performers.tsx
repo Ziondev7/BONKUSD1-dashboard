@@ -12,6 +12,7 @@ interface TopPerformersProps {
   topGainers: Token[]
   topLosers: Token[]
   onSelectToken: (token: Token) => void
+  compact?: boolean
 }
 
 const TokenLogo = memo(function TokenLogo({ 
@@ -30,14 +31,14 @@ const TokenLogo = memo(function TokenLogo({
 
   if (!token.imageUrl || hasError) {
     return (
-      <div className={`${sizeClasses} rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-2xl`}>
+      <div className={`${sizeClasses} rounded-[2px_8px_2px_8px] bg-[rgba(168,85,247,0.1)] border border-[rgba(168,85,247,0.2)] flex items-center justify-center text-2xl`}>
         {token.emoji}
       </div>
     )
   }
 
   return (
-    <div className={`${sizeClasses} rounded-xl bg-white/[0.04] border border-white/[0.08] overflow-hidden relative`}>
+    <div className={`${sizeClasses} rounded-[2px_8px_2px_8px] bg-[rgba(168,85,247,0.1)] border border-[rgba(168,85,247,0.2)] overflow-hidden relative`}>
       <Image
         src={token.imageUrl || "/placeholder.svg"}
         alt={token.name}
@@ -123,16 +124,16 @@ const PerformerCard = memo(function PerformerCard({
 }) {
   const isPositive = token.change24h >= 0
   const accent = accentColor === "bonk" ? {
-    bg: "bg-bonk/5",
-    border: "border-bonk/30",
-    glow: "shadow-[0_0_30px_rgba(250,204,21,0.15)]",
-    badge: "bg-bonk text-black",
+    bg: "bg-[rgba(168,85,247,0.08)]",
+    border: "border-[rgba(168,85,247,0.4)]",
+    glow: "shadow-[0_0_30px_rgba(168,85,247,0.2)]",
+    badge: "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white",
     icon: Zap,
   } : {
     bg: "bg-success/5",
     border: "border-success/30",
-    glow: "shadow-[0_0_30px_rgba(0,255,136,0.15)]",
-    badge: "bg-success text-black",
+    glow: "shadow-[0_0_30px_rgba(16,185,129,0.15)]",
+    badge: "bg-success text-white",
     icon: Flame,
   }
 
@@ -142,29 +143,29 @@ const PerformerCard = memo(function PerformerCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: rank * 0.1 }}
       whileHover={{ y: -4, scale: 1.01 }}
-      className={`relative group overflow-hidden rounded-xl border transition-all duration-300 ${
+      className={`relative group rounded-[2px_8px_2px_8px] transition-all duration-300 ${
         isTopRank
-          ? `${accent.bg} ${accent.border} ${accent.glow}`
-          : "bg-white/[0.02] border-white/[0.06] hover:border-white/[0.12]"
+          ? "card-champion"
+          : "bg-[rgba(20,15,35,0.6)] border border-[rgba(168,85,247,0.2)] hover:border-[rgba(168,85,247,0.4)] gradient-border overflow-hidden"
       }`}
     >
       {/* Shine effect on hover */}
       {isTopRank && (
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 pointer-events-none z-10 rounded-[2px_8px_2px_8px] overflow-hidden" />
       )}
 
       <div className="p-5 relative z-10">
         {/* Header: Rank & Change */}
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center gap-2">
-            <span className={`text-xs font-bold px-2 py-1 rounded-lg font-mono ${
-              isTopRank ? accent.badge : "bg-white/[0.06] text-white/60"
+            <span className={`text-xs font-bold px-2 py-1 rounded-[2px_6px_2px_6px] font-mono ${
+              isTopRank ? accent.badge : "bg-[rgba(168,85,247,0.1)] text-white/60"
             }`}>
               #{String(rank).padStart(2, "0")}
             </span>
-            {isTopRank && <Crown className="w-4 h-4 text-bonk" />}
+            {isTopRank && <Crown className="w-4 h-4 text-[#A855F7]" />}
           </div>
-          <div className={`flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-full ${
+          <div className={`flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-[2px_6px_2px_6px] ${
             isPositive ? "text-success bg-success/10" : "text-danger bg-danger/10"
           }`}>
             {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
@@ -212,7 +213,7 @@ const PerformerCard = memo(function PerformerCard({
               e.stopPropagation()
               onSelect()
             }}
-            className="flex-1 bg-white/[0.04] hover:bg-white/[0.08] text-white text-xs font-bold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 border border-white/[0.06]"
+            className="flex-1 bg-[rgba(168,85,247,0.08)] hover:bg-[rgba(168,85,247,0.15)] text-white text-xs font-bold py-2.5 rounded-[2px_6px_2px_6px] transition-colors flex items-center justify-center gap-2 border border-[rgba(168,85,247,0.2)]"
           >
             Details <ExternalLink size={12} />
           </button>
@@ -221,7 +222,7 @@ const PerformerCard = memo(function PerformerCard({
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className={`flex-1 ${accentColor === 'bonk' ? 'bg-bonk hover:bg-bonk/90' : 'bg-success hover:bg-success/90'} text-black text-xs font-bold py-2.5 rounded-lg transition-all flex items-center justify-center gap-2`}
+            className={`flex-1 ${accentColor === 'bonk' ? 'bg-gradient-to-r from-[#A855F7] to-[#EC4899] hover:opacity-90' : 'bg-success hover:bg-success/90'} text-white text-xs font-bold py-2.5 rounded-[2px_6px_2px_6px] transition-all flex items-center justify-center gap-2`}
           >
             Trade
             <Image src="/trojan-horse.png" alt="Trojan" width={14} height={14} unoptimized />
@@ -232,10 +233,10 @@ const PerformerCard = memo(function PerformerCard({
   )
 })
 
-export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: TopPerformersProps) {
+export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken, compact = false }: TopPerformersProps) {
   if (tokens.length === 0 && topGainers.length === 0) {
     return (
-      <section className="mb-10">
+      <section className={compact ? "mb-0" : "mb-10"}>
         <h2 className="text-lg font-bold text-white mb-5 flex items-center gap-3 font-mono">
           <Trophy className="w-5 h-5 text-bonk" />
           TOP PERFORMERS
@@ -247,17 +248,103 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
     )
   }
 
+  // Compact layout for Pro Mode
+  if (compact) {
+    return (
+      <div className="space-y-3">
+        {/* Top 3 by Market Cap - Compact */}
+        <div className="glass-card-solid p-4 rounded-[2px_8px_2px_8px]">
+          <div className="flex items-center gap-2 mb-3">
+            <Trophy className="w-4 h-4 text-[#A855F7]" />
+            <span className="font-mono font-bold text-xs tracking-wide">TOP BY MCAP</span>
+          </div>
+          <div className="space-y-2">
+            {tokens.slice(0, 3).map((token, i) => {
+              const isPositive = token.change24h >= 0
+              return (
+                <div
+                  key={token.id}
+                  onClick={() => onSelectToken(token)}
+                  className="flex items-center gap-3 p-2 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer transition-colors"
+                >
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                    i === 0 ? "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white" : "bg-white/10 text-white/50"
+                  }`}>
+                    #{i + 1}
+                  </span>
+                  <TokenLogo token={token} size="sm" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm text-white truncate">{token.name}</p>
+                    <p className="text-white/40 text-xs font-mono">{formatNumber(token.mcap)}</p>
+                  </div>
+                  <span className={`text-xs font-mono font-bold ${isPositive ? "text-success" : "text-danger"}`}>
+                    {isPositive ? "+" : ""}{token.change24h.toFixed(1)}%
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Gainers & Losers - Compact */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* Gainers */}
+          <div className="glass-card-solid p-3 rounded-[2px_8px_2px_8px]">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-3.5 h-3.5 text-success" />
+              <span className="font-mono font-bold text-[10px] tracking-wide">GAINERS</span>
+            </div>
+            <div className="space-y-1.5">
+              {topGainers.slice(0, 3).map((token, i) => (
+                <div
+                  key={`g-${token.id}`}
+                  onClick={() => onSelectToken(token)}
+                  className="flex items-center gap-2 p-1.5 rounded bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer"
+                >
+                  <span className="text-[9px] font-mono text-white/40">#{i + 1}</span>
+                  <p className="flex-1 text-xs font-medium text-white truncate">{token.symbol}</p>
+                  <span className="text-[10px] font-mono font-bold text-success">+{token.change24h.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Losers */}
+          <div className="glass-card-solid p-3 rounded-[2px_8px_2px_8px]">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingDown className="w-3.5 h-3.5 text-danger" />
+              <span className="font-mono font-bold text-[10px] tracking-wide">LOSERS</span>
+            </div>
+            <div className="space-y-1.5">
+              {topLosers.slice(0, 3).map((token, i) => (
+                <div
+                  key={`l-${token.id}`}
+                  onClick={() => onSelectToken(token)}
+                  className="flex items-center gap-2 p-1.5 rounded bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer"
+                >
+                  <span className="text-[9px] font-mono text-white/40">#{i + 1}</span>
+                  <p className="flex-1 text-xs font-medium text-white truncate">{token.symbol}</p>
+                  <span className="text-[10px] font-mono font-bold text-danger">{token.change24h.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <section className="mb-10 space-y-10">
+    <section className="mb-14 space-y-10">
       {/* Top by Market Cap */}
       <div>
-        <div className="flex items-center gap-3 mb-5">
-          <Trophy className="w-5 h-5 text-bonk" />
+        <div className="flex items-center gap-3 mb-6">
+          <Trophy className="w-5 h-5 text-[#A855F7]" />
           <h2 className="font-mono font-bold text-sm tracking-wide">TOP PERFORMERS</h2>
           <span className="text-white/30 font-mono text-xs">// BY MARKET CAP</span>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-5">
+        <div className="grid md:grid-cols-3 gap-6">
           {tokens.slice(0, 3).map((token, i) => (
             <PerformerCard
               key={token.id}
@@ -275,8 +362,8 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Top Gainers */}
         {topGainers.length > 0 && (
-          <div className="glass-card-solid p-5 rounded-xl">
-            <div className="flex items-center gap-3 mb-5">
+          <div className="glass-card-solid p-5 rounded-[2px_8px_2px_8px] shimmer-effect glow-hover">
+            <div className="flex items-center gap-3 mb-5 scan-effect">
               <TrendingUp className="w-5 h-5 text-success" />
               <h2 className="font-mono font-bold text-sm tracking-wide">TOP GAINERS</h2>
               <span className="text-white/30 font-mono text-xs">// 24H</span>
@@ -286,13 +373,14 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
               {topGainers.slice(0, 3).map((token, i) => (
                 <div
                   key={`gainer-${token.id}`}
-                  className="flex items-center gap-4 p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] hover:border-white/[0.08] transition-all cursor-pointer group"
+                  onClick={() => onSelectToken(token)}
+                  className="flex items-center gap-4 p-3 rounded-[2px_6px_2px_6px] bg-[rgba(168,85,247,0.04)] hover:bg-[rgba(168,85,247,0.1)] border border-[rgba(168,85,247,0.15)] hover:border-[rgba(168,85,247,0.3)] transition-all cursor-pointer group"
                 >
                   {/* Rank */}
-                  <span className={`text-xs font-bold px-2 py-1 rounded font-mono ${
-                    i === 0 
+                  <span className={`text-xs font-bold px-2 py-1 rounded-[2px_4px_2px_4px] font-mono ${
+                    i === 0
                       ? "bg-success/20 text-success"
-                      : "bg-white/[0.06] text-white/50"
+                      : "bg-[rgba(168,85,247,0.1)] text-white/50"
                   }`}>
                     #{i + 1}
                   </span>
@@ -318,7 +406,7 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover:opacity-100 bg-success/20 text-success hover:bg-success hover:text-black"
+                    className="px-3 py-1.5 rounded-[2px_6px_2px_6px] text-xs font-bold transition-all opacity-0 group-hover:opacity-100 bg-success/20 text-success hover:bg-success hover:text-white"
                   >
                     Trade
                   </a>
@@ -330,8 +418,8 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
 
         {/* Top Losers */}
         {topLosers.length > 0 && (
-          <div className="glass-card-solid p-5 rounded-xl">
-            <div className="flex items-center gap-3 mb-5">
+          <div className="glass-card-solid p-5 rounded-[2px_8px_2px_8px] shimmer-effect glow-hover">
+            <div className="flex items-center gap-3 mb-5 scan-effect">
               <TrendingDown className="w-5 h-5 text-danger" />
               <h2 className="font-mono font-bold text-sm tracking-wide">TOP LOSERS</h2>
               <span className="text-white/30 font-mono text-xs">// 24H</span>
@@ -341,13 +429,14 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
               {topLosers.slice(0, 3).map((token, i) => (
                 <div
                   key={`loser-${token.id}`}
-                  className="flex items-center gap-4 p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] hover:border-white/[0.08] transition-all cursor-pointer group"
+                  onClick={() => onSelectToken(token)}
+                  className="flex items-center gap-4 p-3 rounded-[2px_6px_2px_6px] bg-[rgba(168,85,247,0.04)] hover:bg-[rgba(168,85,247,0.1)] border border-[rgba(168,85,247,0.15)] hover:border-[rgba(168,85,247,0.3)] transition-all cursor-pointer group"
                 >
                   {/* Rank */}
-                  <span className={`text-xs font-bold px-2 py-1 rounded font-mono ${
-                    i === 0 
+                  <span className={`text-xs font-bold px-2 py-1 rounded-[2px_4px_2px_4px] font-mono ${
+                    i === 0
                       ? "bg-danger/20 text-danger"
-                      : "bg-white/[0.06] text-white/50"
+                      : "bg-[rgba(168,85,247,0.1)] text-white/50"
                   }`}>
                     #{i + 1}
                   </span>
@@ -373,7 +462,7 @@ export function TopPerformers({ tokens, topGainers, topLosers, onSelectToken }: 
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all opacity-0 group-hover:opacity-100 bg-danger/20 text-danger hover:bg-danger hover:text-black"
+                    className="px-3 py-1.5 rounded-[2px_6px_2px_6px] text-xs font-bold transition-all opacity-0 group-hover:opacity-100 bg-danger/20 text-danger hover:bg-danger hover:text-white"
                   >
                     Trade
                   </a>

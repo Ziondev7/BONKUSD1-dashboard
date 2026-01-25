@@ -133,6 +133,21 @@ async function fetchWithTimeout(url: string, timeout = 10000): Promise<Response>
   }
 }
 
+/**
+ * Check if a pool type indicates it's from LaunchLab/BonkFun
+ * BonkFun tokens graduate to CPMM pools via LaunchLab
+ * This matches the filtering logic in /api/tokens
+ */
+function isLaunchLabPoolType(poolType?: string): boolean {
+  if (!poolType) return false
+  const type = poolType.toLowerCase()
+  return type.includes("launchlab") ||
+         type.includes("launch") ||
+         type === "cpmm" ||
+         type === "standard" ||
+         type === "concentrated"
+}
+
 // ============================================
 // BONKFUN TOKEN WHITELIST (from Dune)
 // ============================================
@@ -359,8 +374,8 @@ function convertDuneToVolumeData(
 // ============================================
 
 /**
- * Fetch ALL USD1 pools from Raydium with their 24h volumes
- * This gives us the authoritative total volume across the ecosystem
+ * Fetch volume data from the tokens API (same source as metrics card)
+ * This ensures volume-history matches the metrics card exactly
  */
 async function fetchAllRaydiumUSD1Pools(): Promise<{
   pools: PoolVolumeData[]
@@ -372,108 +387,48 @@ async function fetchAllRaydiumUSD1Pools(): Promise<{
   let totalLiquidity = 0
 
   try {
-    // First, fetch the BonkFun token whitelist from Dune
-    const bonkfunTokens = await fetchBonkFunTokenList()
-    const useWhitelist = bonkfunTokens.size > 0
+    // Fetch from tokens API to get the same filtered data as metrics card
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
 
-    if (useWhitelist) {
-      console.log(`[Volume] Using BonkFun token whitelist (${bonkfunTokens.size} tokens)`)
-    } else {
-      console.log("[Volume] WARNING: No BonkFun token whitelist available, results may include non-BonkFun tokens")
-    }
+    const response = await fetchWithTimeout(`${baseUrl}/api/tokens-v2`, 30000)
 
-    const pageSize = 500
-    const maxPages = 5
-    const poolMap = new Map<string, PoolVolumeData>()
-
-    // Fetch first page to get total count
-    const firstPageUrl = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=1`
-    const firstResponse = await fetchWithTimeout(firstPageUrl)
-
-    if (!firstResponse.ok) {
-      console.error("[Volume] Raydium API error:", firstResponse.status)
+    if (!response.ok) {
+      console.error("[Volume] Tokens API error:", response.status)
       return { pools: [], totalVolume24h: 0, totalLiquidity: 0 }
     }
 
-    const firstJson = await firstResponse.json()
-    if (!firstJson.success || !firstJson.data?.data) {
+    const json = await response.json()
+    const tokens = json.tokens || []
+
+    if (tokens.length === 0) {
+      console.log("[Volume] No tokens returned from API")
       return { pools: [], totalVolume24h: 0, totalLiquidity: 0 }
     }
 
-    const processPool = (pool: any) => {
-      const mintA = pool.mintA?.address
-      const mintB = pool.mintB?.address
-      const symbolA = pool.mintA?.symbol
-      const symbolB = pool.mintB?.symbol
+    // Convert tokens to pool format and sum volumes
+    for (const token of tokens) {
+      const volume24h = token.volume24h || 0
+      const liquidity = token.liquidity || 0
 
-      const isAUSD1 = mintA === USD1_MINT
-      const isBUSD1 = mintB === USD1_MINT
-
-      if (!isAUSD1 && !isBUSD1) return
-
-      // Get the paired token (the BONK.fun launched token)
-      const pairedSymbol = isAUSD1 ? symbolB : symbolA
-      const pairedMint = isAUSD1 ? mintB : mintA
-
-      // Use whitelist to only include verified BonkFun tokens
-      if (useWhitelist) {
-        if (!bonkfunTokens.has(pairedMint)) return
-      }
-
-      const volume24h = pool.day?.volume || 0
-      const liquidity = pool.tvl || 0
-
-      // Use pool ID as key to avoid duplicates, keep highest volume pool per token
-      const existing = poolMap.get(pairedMint)
-      if (!existing || volume24h > existing.volume24h) {
-        poolMap.set(pairedMint, {
-          poolId: pool.id,
-          symbol: pairedSymbol || "Unknown",
-          volume24h,
-          liquidity,
-        })
-      }
-    }
-
-    // Process first page
-    firstJson.data.data.forEach(processPool)
-
-    const totalCount = firstJson.data.count || firstJson.data.data.length
-    const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages)
-
-    // Fetch remaining pages in parallel
-    if (totalPages > 1 && firstJson.data.data.length >= pageSize) {
-      const pagePromises = []
-      for (let page = 2; page <= totalPages; page++) {
-        const url = `${RAYDIUM_API}/pools/info/mint?mint1=${USD1_MINT}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=${pageSize}&page=${page}`
-        pagePromises.push(
-          fetchWithTimeout(url, 8000)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null)
-        )
-      }
-
-      const results = await Promise.all(pagePromises)
-      results.forEach(json => {
-        if (json?.success && json.data?.data) {
-          json.data.data.forEach(processPool)
-        }
+      pools.push({
+        poolId: token.address,
+        symbol: token.symbol || "Unknown",
+        volume24h,
+        liquidity,
       })
-    }
 
-    // Convert map to array and calculate totals
-    Array.from(poolMap.values()).forEach((pool) => {
-      pools.push(pool)
-      totalVolume24h += pool.volume24h
-      totalLiquidity += pool.liquidity
-    })
+      totalVolume24h += volume24h
+      totalLiquidity += liquidity
+    }
 
     // Sort by volume descending
     pools.sort((a, b) => b.volume24h - a.volume24h)
 
-    console.log(`[Volume] Found ${pools.length} verified BonkFun/USD1 pools with total 24h volume: $${totalVolume24h.toLocaleString()}`)
+    console.log(`[Volume] Using tokens API data: ${pools.length} tokens with total 24h volume: $${totalVolume24h.toLocaleString()}`)
   } catch (error) {
-    console.error("[Volume] Error fetching Raydium pools:", error)
+    console.error("[Volume] Error fetching from tokens API:", error)
   }
 
   return { pools, totalVolume24h, totalLiquidity }
