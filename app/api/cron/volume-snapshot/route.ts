@@ -32,6 +32,20 @@ function shouldExclude(symbol?: string): boolean {
 }
 
 /**
+ * Check if a pool type indicates it's from LaunchLab/BonkFun
+ * BonkFun tokens graduate to CPMM pools via LaunchLab
+ */
+function isLaunchLabPoolType(poolType?: string): boolean {
+  if (!poolType) return false
+  const type = poolType.toLowerCase()
+  return type.includes("launchlab") ||
+         type.includes("launch") ||
+         type === "cpmm" ||
+         type === "standard" ||
+         type === "concentrated"
+}
+
+/**
  * Fetch current volume metrics from all USD1 pools
  */
 async function fetchCurrentMetrics(): Promise<{
@@ -75,6 +89,13 @@ async function fetchCurrentMetrics(): Promise<{
       const pairedMint = isAUSD1 ? mintB : mintA
 
       if (shouldExclude(pairedSymbol)) return
+
+      // Skip tokens ending with "USA" - they're from a different launchpad
+      if (pairedMint && pairedMint.endsWith("USA")) return
+
+      // Only include BonkFun tokens (LaunchLab/CPMM pool types)
+      const poolType = pool.type || pool.poolType || ""
+      if (!isLaunchLabPoolType(poolType)) return
 
       // Track unique pools by paired mint
       if (!uniquePools.has(pairedMint)) {

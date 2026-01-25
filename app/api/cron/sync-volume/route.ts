@@ -20,6 +20,20 @@ function shouldExclude(symbol?: string): boolean {
 }
 
 /**
+ * Check if a pool type indicates it's from LaunchLab/BonkFun
+ * BonkFun tokens graduate to CPMM pools via LaunchLab
+ */
+function isLaunchLabPoolType(poolType?: string): boolean {
+  if (!poolType) return false
+  const type = poolType.toLowerCase()
+  return type.includes("launchlab") ||
+         type.includes("launch") ||
+         type === "cpmm" ||
+         type === "standard" ||
+         type === "concentrated"
+}
+
+/**
  * Fetch total 24h volume from Raydium for all BonkFun/USD1 pools
  */
 async function fetchRaydiumVolume(): Promise<{
@@ -71,6 +85,13 @@ async function fetchRaydiumVolume(): Promise<{
 
       // Exclude non-BONK.fun tokens
       if (shouldExclude(pairedSymbol)) continue
+
+      // Skip tokens ending with "USA" - they're from a different launchpad
+      if (pairedMint && pairedMint.endsWith("USA")) continue
+
+      // Only include BonkFun tokens (LaunchLab/CPMM pool types)
+      const poolType = pool.type || pool.poolType || ""
+      if (!isLaunchLabPoolType(poolType)) continue
 
       const volume24h = pool.day?.volume || 0
       totalVolume += volume24h

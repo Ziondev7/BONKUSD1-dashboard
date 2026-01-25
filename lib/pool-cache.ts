@@ -18,6 +18,7 @@ export const CACHE_TTL = {
   TOKEN_METADATA: 60 * 60 * 1000,  // 1 hour - rarely changes
   PRICE_DATA: 15 * 1000,           // 15 seconds - changes often
   ENRICHED_TOKENS: 30 * 1000,      // 30 seconds - balance freshness vs API calls
+  HOLDER_COUNT: 60 * 60 * 1000,    // 1 hour - holder counts don't change rapidly
 }
 
 // Cache keys
@@ -26,6 +27,7 @@ const CACHE_KEYS = {
   POOL_DISCOVERY_TIME: 'pools:usd1:discovered_at',
   TOKEN_METADATA: 'tokens:metadata',
   ENRICHED_TOKENS: 'tokens:enriched',
+  HOLDER_COUNTS: 'tokens:holders',
 }
 
 // In-memory cache fallback
@@ -40,12 +42,14 @@ interface MemoryCache {
     data: any[]
     timestamp: number
   } | null
+  holderCounts: Map<string, { count: number; timestamp: number }>
 }
 
 const memoryCache: MemoryCache = {
   pools: null,
   tokenMetadata: new Map(),
   enrichedTokens: null,
+  holderCounts: new Map(),
 }
 
 // Type for Vercel KV
@@ -317,6 +321,78 @@ export async function setCachedEnrichedTokens(tokens: any[]): Promise<void> {
       // Ignore KV errors
     }
   }
+}
+
+// ============================================
+// HOLDER COUNT CACHE
+// ============================================
+
+/**
+ * Get cached holder count for a token
+ */
+export async function getCachedHolderCount(mint: string): Promise<number | null> {
+  // Check memory first
+  const memCached = memoryCache.holderCounts.get(mint)
+  if (memCached && Date.now() - memCached.timestamp < CACHE_TTL.HOLDER_COUNT) {
+    return memCached.count
+  }
+
+  // Try KV
+  const kv = await getKV()
+  if (kv) {
+    try {
+      const cached = await kv.get(`${CACHE_KEYS.HOLDER_COUNTS}:${mint}`)
+      if (cached) {
+        const data = typeof cached === 'string' ? JSON.parse(cached) : cached as { count: number; timestamp: number }
+        if (Date.now() - data.timestamp < CACHE_TTL.HOLDER_COUNT) {
+          memoryCache.holderCounts.set(mint, data)
+          return data.count
+        }
+      }
+    } catch {
+      // Ignore KV errors
+    }
+  }
+
+  return null
+}
+
+/**
+ * Save holder count to cache
+ */
+export async function setCachedHolderCount(mint: string, count: number): Promise<void> {
+  const data = { count, timestamp: Date.now() }
+
+  // Save to memory
+  memoryCache.holderCounts.set(mint, data)
+
+  // Try KV
+  const kv = await getKV()
+  if (kv) {
+    try {
+      await kv.set(`${CACHE_KEYS.HOLDER_COUNTS}:${mint}`, JSON.stringify(data), {
+        ex: Math.ceil(CACHE_TTL.HOLDER_COUNT / 1000),
+      })
+    } catch {
+      // Ignore KV errors
+    }
+  }
+}
+
+/**
+ * Batch get holder counts from cache
+ */
+export async function getCachedHolderCountsBatch(mints: string[]): Promise<Map<string, number>> {
+  const results = new Map<string, number>()
+
+  for (const mint of mints) {
+    const cached = memoryCache.holderCounts.get(mint)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL.HOLDER_COUNT) {
+      results.set(mint, cached.count)
+    }
+  }
+
+  return results
 }
 
 // ============================================

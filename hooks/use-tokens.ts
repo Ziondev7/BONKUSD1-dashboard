@@ -59,6 +59,7 @@ const fetcher = async (url: string): Promise<ApiResponse> => {
 interface UseTokensOptions {
   refreshInterval?: number // Default 10s for snappy updates
   enableSound?: boolean
+  initialData?: Token[] // Server-rendered initial data for instant loading
 }
 
 interface UseTokensReturn {
@@ -76,10 +77,10 @@ interface UseTokensReturn {
 }
 
 export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
-  const { refreshInterval = 10000, enableSound = false } = options // 10s for faster updates
+  const { refreshInterval = 10000, enableSound = false, initialData } = options // 10s for faster updates
 
-  // Initial cache load
-  const [cachedTokens] = useState<Token[] | null>(() => loadLocalCache())
+  // Initial data: prefer server-provided data, then local cache
+  const [cachedTokens] = useState<Token[] | null>(() => initialData || loadLocalCache())
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, { price: number; change24h?: number; timestamp: number }>>(new Map())
@@ -187,6 +188,7 @@ export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
         losersCount: 0,
         avgChange24h: 0,
         timestamp: Date.now(),
+        raydiumTotalVolume: data?.raydiumTotalVolume,
       }
     }
 
@@ -206,8 +208,9 @@ export function useTokens(options: UseTokensOptions = {}): UseTokensReturn {
       losersCount,
       avgChange24h,
       timestamp: Date.now(),
+      raydiumTotalVolume: data?.raydiumTotalVolume,
     }
-  }, [tokens])
+  }, [tokens, data?.raydiumTotalVolume])
 
   // Status calculation
   const status = useMemo<StatusState>(() => {

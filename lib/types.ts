@@ -19,13 +19,10 @@ export interface Token {
   txns24h: number
   buys24h: number
   sells24h: number
+  holders?: number
   twitter: string | null
   telegram: string | null
   website: string | null
-  // Safety metrics
-  safetyScore: number
-  safetyLevel: 'safe' | 'caution' | 'risky'
-  safetyWarnings: string[]
   // Real-time tracking
   prevPrice?: number
   priceDirection?: 'up' | 'down' | 'neutral'
@@ -72,6 +69,7 @@ export interface MetricsSnapshot {
   losersCount: number
   avgChange24h: number
   timestamp: number
+  raydiumTotalVolume?: number
 }
 
 export interface ApiHealth {
@@ -104,6 +102,7 @@ export interface ApiResponse {
   age?: number
   health?: ApiHealth
   error?: string
+  raydiumTotalVolume?: number
   // v2 API specific fields
   discovery?: 'on-chain' | 'api'
   version?: 'v1' | 'v2'

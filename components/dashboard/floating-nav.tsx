@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { RefreshCw, Volume2, VolumeX, Filter, Zap, Activity } from "lucide-react"
+import { RefreshCw, Volume2, VolumeX, Filter, Zap, Activity, LayoutGrid, Maximize2 } from "lucide-react"
 import Image from "next/image"
 import { motion, AnimatePresence } from "framer-motion"
 import type { StatusState } from "@/lib/types"
@@ -19,6 +19,8 @@ interface FloatingNavProps {
   onScrollToContent?: () => void
   activeFiltersCount?: number
   totalVolume?: number
+  proMode?: boolean
+  onToggleProMode?: () => void
 }
 
 const TABS = [
@@ -41,6 +43,8 @@ export function FloatingNav({
   onScrollToContent,
   activeFiltersCount = 0,
   totalVolume = 0,
+  proMode = false,
+  onToggleProMode,
 }: FloatingNavProps) {
   const [scrolled, setScrolled] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -100,15 +104,15 @@ export function FloatingNav({
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              className="relative w-10 h-10 md:w-11 md:h-11"
+              className="relative w-12 h-12 md:w-14 md:h-14"
               title="Back to top"
             >
               <Image
                 src="/logo.png"
                 alt="BONKUSD1"
-                width={44}
-                height={44}
-                className="object-contain drop-shadow-[0_0_20px_rgba(250,204,21,0.5)]"
+                width={56}
+                height={56}
+                className="object-contain drop-shadow-[0_0_20px_rgba(250,204,21,0.5)] logo-pulse"
                 priority
               />
             </motion.button>
@@ -120,16 +124,16 @@ export function FloatingNav({
               title="Back to top"
             >
               <span className="text-white">BONK</span>
-              <span className="text-bonk text-glow-bonk">USD1</span>
+              <span className="bg-gradient-to-r from-[#A855F7] to-[#EC4899] bg-clip-text text-transparent text-glow-bonk">USD1</span>
             </button>
 
             {/* Live Status - suppressHydrationWarning since status can differ between server/client */}
             <div className="hidden md:flex items-center gap-3 border-l border-white/10 pl-4" suppressHydrationWarning>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06]">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06] live-scan">
                 <div className="relative">
                   <div
                     suppressHydrationWarning
-                    className={`w-2 h-2 rounded-full ${
+                    className={`w-2 h-2 rounded-full live-pulse ${
                       status.type === "live"
                         ? "bg-success"
                         : status.type === "error"
@@ -166,9 +170,9 @@ export function FloatingNav({
 
             {/* Metrics Pills */}
             <div className="hidden lg:flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06]">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-[2px_6px_2px_6px] bg-white/[0.03] border border-[rgba(168,85,247,0.2)]">
                 <span className="text-white/40 text-[10px] font-mono uppercase tracking-wider">Pairs</span>
-                <span className="font-mono text-sm text-bonk font-bold">{tokenCount}</span>
+                <span className="font-mono text-sm text-[#C084FC] font-bold">{tokenCount}</span>
               </div>
               
               {totalVolume > 0 && (
@@ -208,8 +212,23 @@ export function FloatingNav({
               </span>
             )}
 
-            {/* Sound Toggle */}
-            
+            {/* Pro Mode Toggle */}
+            {onToggleProMode && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={onToggleProMode}
+                className={`hidden md:flex items-center gap-2 px-3 py-2 rounded-[2px_6px_2px_6px] font-mono text-xs font-bold transition-all ${
+                  proMode
+                    ? "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+                    : "bg-white/[0.03] border border-white/[0.06] text-white/60 hover:bg-white/[0.06] hover:text-white hover:border-bonk/30"
+                }`}
+                title={proMode ? "Exit Pro Mode" : "Enter Pro Mode"}
+              >
+                {proMode ? <Maximize2 size={14} /> : <LayoutGrid size={14} />}
+                <span className="hidden lg:inline">PRO</span>
+              </motion.button>
+            )}
 
             {/* Refresh Button */}
             <motion.button
@@ -235,7 +254,7 @@ export function FloatingNav({
               href="https://x.com/BONKUSD1"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 bg-bonk hover:bg-bonk/90 text-black px-4 md:px-5 py-2.5 rounded-lg font-bold text-sm transition-all glow-bonk"
+              className="flex items-center gap-2 bg-gradient-to-r from-[#A855F7] to-[#EC4899] hover:opacity-90 text-white px-4 md:px-5 py-2.5 rounded-[2px_8px_2px_8px] font-bold text-sm transition-all glow-bonk"
             >
               <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
                 <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
@@ -258,9 +277,9 @@ export function FloatingNav({
                   onTabChange(tab.id)
                   onScrollToContent?.()
                 }}
-                className={`relative px-4 py-2 rounded-lg font-mono text-xs font-bold tracking-wide whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
+                className={`relative px-4 py-2 rounded-[2px_6px_2px_6px] font-mono text-xs font-bold tracking-wide whitespace-nowrap transition-all duration-200 flex items-center gap-2 ${
                   isActive
-                    ? "bg-bonk text-black shadow-[0_0_20px_rgba(250,204,21,0.3)]"
+                    ? "bg-gradient-to-r from-[#A855F7] to-[#EC4899] text-white shadow-[0_0_20px_rgba(168,85,247,0.3)]"
                     : "text-white/50 hover:text-white hover:bg-white/[0.04]"
                 }`}
               >

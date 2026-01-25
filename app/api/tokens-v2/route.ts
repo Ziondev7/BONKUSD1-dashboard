@@ -28,6 +28,7 @@ import {
   getCacheStats,
   CACHE_TTL,
 } from "@/lib/pool-cache"
+import { fetchHolderCountsBatch } from "@/lib/holder-fetcher"
 
 // ============================================
 // CONFIGURATION
@@ -131,78 +132,6 @@ function getTokenEmoji(name?: string): string {
   if (n.includes("trump")) return "🇺🇸"
   if (n.includes("ai") || n.includes("gpt")) return "🤖"
   return "🪙"
-}
-
-function calculateSafetyScore(token: {
-  liquidity: number
-  mcap: number
-  volume24h: number
-  txns24h: number
-  buys24h: number
-  sells24h: number
-  created: number | null
-  hasSocials: boolean
-}): { score: number; level: "safe" | "caution" | "risky"; warnings: string[] } {
-  let score = 0
-  const warnings: string[] = []
-
-  if (token.liquidity > token.mcap * 10 && token.mcap > 0) {
-    warnings.push("Suspicious liquidity ratio")
-    score -= 15
-  }
-
-  if (token.txns24h > 0 && token.volume24h > 0) {
-    const avgTxnSize = token.volume24h / token.txns24h
-    if (avgTxnSize < 0.5) {
-      warnings.push("Abnormal transaction pattern")
-      score -= 10
-    }
-  }
-
-  if (token.liquidity >= 50000) score += 30
-  else if (token.liquidity >= 10000) score += 20
-  else if (token.liquidity >= 5000) score += 10
-  else warnings.push("Low liquidity")
-
-  const liqRatio = token.mcap > 0 ? (token.liquidity / token.mcap) * 100 : 0
-  if (liqRatio >= 10) score += 20
-  else if (liqRatio >= 5) score += 15
-  else if (liqRatio >= 2) score += 10
-  else warnings.push("Low liq/mcap ratio")
-
-  if (token.txns24h >= 100) score += 20
-  else if (token.txns24h >= 50) score += 15
-  else if (token.txns24h >= 20) score += 10
-  else if (token.txns24h < 10) warnings.push("Low trading activity")
-
-  const totalTxns = token.buys24h + token.sells24h
-  if (totalTxns > 0) {
-    const buyRatio = token.buys24h / totalTxns
-    if (buyRatio >= 0.35 && buyRatio <= 0.65) score += 15
-    else if (buyRatio >= 0.25 && buyRatio <= 0.75) score += 10
-    else warnings.push("Unbalanced buy/sell")
-  }
-
-  if (token.created) {
-    const ageHours = (Date.now() - token.created) / (1000 * 60 * 60)
-    if (ageHours >= 72) score += 10
-    else if (ageHours >= 24) score += 7
-    else if (ageHours >= 6) score += 4
-    else warnings.push("Very new token")
-  } else {
-    warnings.push("Unknown age")
-  }
-
-  if (token.hasSocials) score += 5
-
-  score = Math.max(0, score)
-
-  let level: "safe" | "caution" | "risky"
-  if (score >= 70) level = "safe"
-  else if (score >= 40) level = "caution"
-  else level = "risky"
-
-  return { score: Math.min(score, 100), level, warnings }
 }
 
 function extractSocialLinks(dexData: any): { twitter?: string; telegram?: string; website?: string } {
@@ -598,23 +527,11 @@ async function fetchAllTokensV2(): Promise<any[]> {
     if (price <= 0) continue
 
     const socials = extractSocialLinks(dexData)
-    const hasSocials = !!(socials.twitter || socials.telegram || socials.website)
 
     const txns24h = (dexData?.txns?.h24?.buys || 0) + (dexData?.txns?.h24?.sells || 0) || gData?.txns24h || 0
     const buys24h = dexData?.txns?.h24?.buys || gData?.buys24h || 0
     const sells24h = dexData?.txns?.h24?.sells || gData?.sells24h || 0
     const created = dexData?.pairCreatedAt || (gData?.createdAt ? new Date(gData.createdAt).getTime() : null)
-
-    const safety = calculateSafetyScore({
-      liquidity,
-      mcap: fdv,
-      volume24h,
-      txns24h,
-      buys24h,
-      sells24h,
-      created,
-      hasSocials,
-    })
 
     tokens.push({
       id: id++,
@@ -640,9 +557,6 @@ async function fetchAllTokensV2(): Promise<any[]> {
       twitter: socials.twitter || null,
       telegram: socials.telegram || null,
       website: socials.website || null,
-      safetyScore: safety.score,
-      safetyLevel: safety.level,
-      safetyWarnings: safety.warnings,
       isBonkFun: true,
       poolType: "cpmm",
       discoverySource,
@@ -651,6 +565,26 @@ async function fetchAllTokensV2(): Promise<any[]> {
 
   // Sort by market cap
   tokens.sort((a, b) => b.mcap - a.mcap)
+
+  // Fetch holder counts for top tokens (to minimize API calls)
+  // Only fetch for tokens that will likely be displayed
+  const holderFetchStart = Date.now()
+  try {
+    const topMints = tokens.slice(0, 50).map(t => t.address)
+    const holderCounts = await fetchHolderCountsBatch(topMints, 5)
+
+    // Add holder counts to tokens
+    for (const token of tokens) {
+      const holders = holderCounts.get(token.address)
+      if (holders !== undefined) {
+        token.holders = holders
+      }
+    }
+
+    console.log(`[API-v2] Fetched holder counts for ${holderCounts.size} tokens in ${Date.now() - holderFetchStart}ms`)
+  } catch (error) {
+    console.warn('[API-v2] Failed to fetch holder counts:', error)
+  }
 
   console.log(`[API-v2] Completed in ${Date.now() - startTime}ms with ${tokens.length} tokens`)
 
@@ -685,6 +619,10 @@ export async function GET(request: Request) {
         },
         rpcHealth: rpcManager.getHealthStatus(),
         cacheStats,
+      }, {
+        headers: {
+          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=300',
+        }
       })
     }
   }
@@ -712,6 +650,10 @@ export async function GET(request: Request) {
       },
       rpcHealth: rpcManager.getHealthStatus(),
       cacheStats,
+    }, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=300',
+      }
     })
   } catch (error) {
     console.error("[API-v2] Fatal error:", error)
