@@ -25,6 +25,7 @@ import { TradeConfirmModal } from "./dashboard/trade-confirm-modal"
 import { DashboardFooter } from "./dashboard/footer"
 import { BackToTop } from "./dashboard/back-to-top"
 import { InfoBanner } from "./dashboard/info-banner"
+import { DesignSwitcher } from "./design-switcher"
 import type { Token, BannerState } from "@/lib/types"
 
 const TOKENS_PER_PAGE = 50
@@ -591,6 +592,9 @@ export function BonkDashboard({ initialTokens }: BonkDashboardProps) {
 
       {/* Back to Top */}
       <BackToTop />
+
+      {/* Design Switcher - Preview different themes */}
+      <DesignSwitcher />
 
     </div>
   )

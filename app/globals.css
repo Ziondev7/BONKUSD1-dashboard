@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Design Variations - Sharp Square Corners */
+@import "../styles/designs/design-1-brutalist.css";
+@import "../styles/designs/design-2-neon-matrix.css";
+@import "../styles/designs/design-3-ice-crystal.css";
+@import "../styles/designs/design-4-cyber-gold.css";
+@import "../styles/designs/design-5-midnight-blood.css";
+
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================

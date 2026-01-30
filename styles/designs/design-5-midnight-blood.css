@@ -1,0 +1,339 @@
+/* ============================================
+   DESIGN 5: MIDNIGHT BLOOD
+   Sharp corners, crimson/red + purple, dark intense
+   ============================================ */
+
+:root[data-design="midnight-blood"] {
+  /* Base palette - Deep crimson black */
+  --background: #0A0408;
+  --background-elevated: #120810;
+  --background-subtle: #1A0C16;
+  --foreground: #FFE8EC;
+  --foreground-muted: #C97A8A;
+
+  /* Card system - Blood red tint */
+  --card: rgba(18, 8, 16, 0.9);
+  --card-hover: rgba(26, 12, 22, 0.95);
+  --card-foreground: #FFE8EC;
+
+  /* Accent colors - Crimson + Deep Purple */
+  --bonk: #DC143C;
+  --bonk-secondary: #7B2CBF;
+  --bonk-glow: rgba(220, 20, 60, 0.5);
+  --bonk-subtle: rgba(220, 20, 60, 0.1);
+
+  /* Status colors - Intense */
+  --success: #00FF88;
+  --success-glow: rgba(0, 255, 136, 0.5);
+  --danger: #FF1744;
+  --danger-glow: rgba(255, 23, 68, 0.5);
+
+  /* Border system - Blood trim */
+  --border: rgba(220, 20, 60, 0.25);
+  --border-hover: rgba(220, 20, 60, 0.5);
+  --border-active: rgba(123, 44, 191, 0.7);
+
+  /* ZERO RADIUS */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-chamfer: 0px;
+  --radius-chamfer-sm: 0px;
+  --radius-chamfer-lg: 0px;
+  --radius-chamfer-xl: 0px;
+}
+
+[data-design="midnight-blood"] body {
+  background: #0A0408;
+}
+
+[data-design="midnight-blood"] .glass-card {
+  background: rgba(18, 8, 16, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(220, 20, 60, 0.2);
+  border-radius: 0;
+  box-shadow:
+    0 4px 24px rgba(220, 20, 60, 0.05),
+    inset 0 1px 0 rgba(255, 232, 236, 0.05);
+}
+
+[data-design="midnight-blood"] .glass-card:hover {
+  background: rgba(26, 12, 22, 0.9);
+  border-color: rgba(220, 20, 60, 0.4);
+  box-shadow:
+    0 8px 40px rgba(220, 20, 60, 0.12),
+    0 0 60px rgba(123, 44, 191, 0.08),
+    inset 0 1px 0 rgba(255, 232, 236, 0.08);
+}
+
+[data-design="midnight-blood"] .glass-card-elevated {
+  background: rgba(18, 8, 16, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(220, 20, 60, 0.3);
+  border-radius: 0;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 40px rgba(220, 20, 60, 0.1);
+}
+
+[data-design="midnight-blood"] .glass-card-premium {
+  background: rgba(18, 8, 16, 0.95);
+  border-radius: 0;
+}
+
+[data-design="midnight-blood"] .glass-card-premium::before {
+  border-radius: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(220, 20, 60, 0.7) 0%,
+    rgba(123, 44, 191, 0.4) 50%,
+    rgba(220, 20, 60, 0.7) 100%
+  );
+}
+
+/* Champion card - Blood style */
+[data-design="midnight-blood"] .card-champion {
+  background: linear-gradient(135deg, rgba(18, 8, 16, 0.98) 0%, rgba(26, 12, 22, 0.98) 100%);
+  border-radius: 0;
+}
+
+[data-design="midnight-blood"] .card-champion::before {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(220, 20, 60, 1) 0%,
+    rgba(255, 23, 68, 0.9) 25%,
+    rgba(123, 44, 191, 0.8) 50%,
+    rgba(255, 23, 68, 0.9) 75%,
+    rgba(220, 20, 60, 1) 100%
+  );
+}
+
+[data-design="midnight-blood"] .card-champion::after {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(220, 20, 60, 0.5) 0%,
+    rgba(123, 44, 191, 0.3) 50%,
+    rgba(220, 20, 60, 0.5) 100%
+  );
+}
+
+/* Animated grid - Blood veins */
+[data-design="midnight-blood"] .animated-grid-bg {
+  background-image:
+    linear-gradient(rgba(220, 20, 60, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(220, 20, 60, 0.04) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Particles - Blood drops */
+[data-design="midnight-blood"] .particle {
+  background: #DC143C;
+  box-shadow: 0 0 8px #DC143C;
+}
+
+[data-design="midnight-blood"] .particle:nth-child(even) {
+  background: #7B2CBF;
+  box-shadow: 0 0 8px #7B2CBF;
+}
+
+/* Blob gradients - Crimson/Purple */
+[data-design="midnight-blood"] .blob-float {
+  background: radial-gradient(ellipse at center, rgba(220, 20, 60, 0.12) 0%, transparent 60%) !important;
+}
+
+[data-design="midnight-blood"] .blob-float-reverse {
+  background: radial-gradient(ellipse at center, rgba(123, 44, 191, 0.08) 0%, transparent 60%) !important;
+}
+
+[data-design="midnight-blood"] .blob-float-slow {
+  background: radial-gradient(ellipse at center, rgba(255, 23, 68, 0.06) 0%, transparent 60%) !important;
+}
+
+/* Table rows */
+[data-design="midnight-blood"] .row-hover {
+  border-left: 3px solid transparent;
+}
+
+[data-design="midnight-blood"] .row-hover:hover {
+  background: rgba(220, 20, 60, 0.08);
+  border-left-color: #DC143C;
+}
+
+/* Hot row - Extra intense */
+[data-design="midnight-blood"] .row-hot {
+  background: rgba(255, 23, 68, 0.06);
+  border-left: 3px solid #FF1744;
+}
+
+[data-design="midnight-blood"] .row-hot:hover {
+  background: rgba(255, 23, 68, 0.1);
+}
+
+/* Glow effects - Blood glow */
+[data-design="midnight-blood"] .glow-bonk {
+  box-shadow:
+    0 0 30px rgba(220, 20, 60, 0.3),
+    0 0 60px rgba(123, 44, 191, 0.15);
+}
+
+[data-design="midnight-blood"] .text-glow-bonk {
+  text-shadow:
+    0 0 10px rgba(220, 20, 60, 0.9),
+    0 0 20px rgba(220, 20, 60, 0.6),
+    0 0 40px rgba(123, 44, 191, 0.4);
+}
+
+[data-design="midnight-blood"] .text-glow-success {
+  text-shadow:
+    0 0 10px rgba(0, 255, 136, 0.9),
+    0 0 20px rgba(0, 255, 136, 0.6);
+}
+
+[data-design="midnight-blood"] .text-glow-danger {
+  text-shadow:
+    0 0 10px rgba(255, 23, 68, 0.9),
+    0 0 20px rgba(255, 23, 68, 0.6),
+    0 0 40px rgba(255, 23, 68, 0.4);
+}
+
+[data-design="midnight-blood"] .glow-danger {
+  box-shadow:
+    0 0 30px rgba(255, 23, 68, 0.4),
+    0 0 60px rgba(255, 23, 68, 0.2);
+}
+
+/* Buttons */
+[data-design="midnight-blood"] button,
+[data-design="midnight-blood"] .btn-press {
+  border-radius: 0 !important;
+}
+
+/* Input fields */
+[data-design="midnight-blood"] input,
+[data-design="midnight-blood"] select {
+  border-radius: 0 !important;
+  border-color: rgba(220, 20, 60, 0.25) !important;
+  color: #FFE8EC;
+}
+
+[data-design="midnight-blood"] input:focus,
+[data-design="midnight-blood"] select:focus {
+  border-color: rgba(220, 20, 60, 0.5) !important;
+  box-shadow: 0 0 20px rgba(220, 20, 60, 0.2);
+}
+
+[data-design="midnight-blood"] input::placeholder {
+  color: rgba(220, 20, 60, 0.4);
+}
+
+/* Skeleton - Blood shimmer */
+[data-design="midnight-blood"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(220, 20, 60, 0.03) 0%,
+    rgba(255, 23, 68, 0.12) 50%,
+    rgba(220, 20, 60, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 0;
+}
+
+/* Status badges */
+[data-design="midnight-blood"] .badge-new {
+  color: #00FF88;
+  background: rgba(0, 255, 136, 0.12);
+  border: 1px solid rgba(0, 255, 136, 0.35);
+  border-radius: 0;
+}
+
+[data-design="midnight-blood"] .badge-hot {
+  color: #FF1744;
+  background: rgba(255, 23, 68, 0.15);
+  border: 1px solid rgba(255, 23, 68, 0.4);
+  border-radius: 0;
+  animation: blood-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes blood-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(255, 23, 68, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(255, 23, 68, 0.5); }
+}
+
+/* Scrollbar */
+[data-design="midnight-blood"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: rgba(220, 20, 60, 0.3);
+}
+
+[data-design="midnight-blood"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(220, 20, 60, 0.5);
+}
+
+/* Selection */
+[data-design="midnight-blood"] ::selection {
+  background: rgba(220, 20, 60, 0.5);
+  color: #ffffff;
+}
+
+/* Liquidity bar */
+[data-design="midnight-blood"] .liq-bar-fill {
+  background: linear-gradient(90deg, #00FF88 0%, #DC143C 50%, #7B2CBF 100%);
+}
+
+/* Elite card */
+[data-design="midnight-blood"] .elite-card::before {
+  background: linear-gradient(
+    135deg,
+    rgba(220, 20, 60, 0.5) 0%,
+    rgba(123, 44, 191, 0.3) 50%,
+    transparent 70%
+  );
+  border-radius: 0;
+}
+
+/* Gradient border */
+[data-design="midnight-blood"] .gradient-border::before {
+  background: linear-gradient(
+    135deg,
+    rgba(220, 20, 60, 0.7) 0%,
+    rgba(123, 44, 191, 0.5) 50%,
+    rgba(220, 20, 60, 0.7) 100%
+  );
+}
+
+/* Focus states */
+[data-design="midnight-blood"] *:focus-visible {
+  outline: 2px solid #DC143C;
+  outline-offset: 2px;
+}
+
+/* Live indicators - Blood pulse */
+[data-design="midnight-blood"] .live-pulse {
+  animation: blood-live-pulse 1s ease-in-out infinite;
+}
+
+@keyframes blood-live-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 15px #DC143C;
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.85);
+    box-shadow: 0 0 8px #DC143C;
+  }
+}
+
+/* Status dot */
+[data-design="midnight-blood"] .status-dot-live::before {
+  background: #DC143C;
+}
+
+[data-design="midnight-blood"] .status-dot-error::before {
+  background: #FF1744;
+}

@@ -1,0 +1,203 @@
+/* ============================================
+   DESIGN 1: BRUTALIST TECH
+   Sharp corners, high contrast, pure geometric
+   ============================================ */
+
+:root[data-design="brutalist"] {
+  /* Base palette - Deep Purple with harsh edges */
+  --background: #0A0612;
+  --background-elevated: #110D1A;
+  --background-subtle: #180F28;
+  --foreground: #FFFFFF;
+  --foreground-muted: #9CA3AF;
+
+  /* Card system - Solid, no blur */
+  --card: rgba(17, 13, 26, 0.95);
+  --card-hover: rgba(24, 15, 40, 0.98);
+  --card-foreground: #FFFFFF;
+
+  /* Accent colors - Electric Purple/Magenta */
+  --bonk: #B766FF;
+  --bonk-secondary: #FF3D9A;
+  --bonk-glow: rgba(183, 102, 255, 0.5);
+  --bonk-subtle: rgba(183, 102, 255, 0.15);
+
+  /* Status colors - Vibrant */
+  --success: #00FF7F;
+  --success-glow: rgba(0, 255, 127, 0.5);
+  --danger: #FF2D55;
+  --danger-glow: rgba(255, 45, 85, 0.5);
+
+  /* Border system - Sharp, visible */
+  --border: rgba(183, 102, 255, 0.4);
+  --border-hover: rgba(183, 102, 255, 0.7);
+  --border-active: rgba(255, 61, 154, 0.8);
+
+  /* ZERO RADIUS - Pure squares */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-chamfer: 0px;
+  --radius-chamfer-sm: 0px;
+  --radius-chamfer-lg: 0px;
+  --radius-chamfer-xl: 0px;
+}
+
+[data-design="brutalist"] .glass-card {
+  background: rgba(17, 13, 26, 0.95);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 2px solid rgba(183, 102, 255, 0.4);
+  border-radius: 0;
+  box-shadow:
+    4px 4px 0 rgba(183, 102, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-design="brutalist"] .glass-card:hover {
+  background: rgba(24, 15, 40, 0.98);
+  border-color: rgba(183, 102, 255, 0.7);
+  box-shadow:
+    6px 6px 0 rgba(255, 61, 154, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translate(-2px, -2px);
+}
+
+[data-design="brutalist"] .glass-card-elevated {
+  background: rgba(17, 13, 26, 0.98);
+  backdrop-filter: none;
+  border: 2px solid rgba(183, 102, 255, 0.5);
+  border-radius: 0;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.5);
+}
+
+[data-design="brutalist"] .glass-card-premium {
+  background: rgba(17, 13, 26, 0.98);
+  border-radius: 0;
+}
+
+[data-design="brutalist"] .glass-card-premium::before {
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(183, 102, 255, 0.8) 0%,
+    rgba(255, 61, 154, 0.6) 50%,
+    rgba(183, 102, 255, 0.8) 100%
+  );
+}
+
+/* Champion card - Brutalist style */
+[data-design="brutalist"] .card-champion {
+  background: linear-gradient(135deg, rgba(17, 13, 26, 0.98) 0%, rgba(24, 15, 40, 0.98) 100%);
+  border-radius: 0;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  position: relative;
+}
+
+[data-design="brutalist"] .card-champion::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 0;
+  background: linear-gradient(90deg, #B766FF, #FF3D9A, #B766FF);
+  z-index: -1;
+  animation: brutalist-border-pulse 2s ease-in-out infinite;
+}
+
+@keyframes brutalist-border-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Buttons - Sharp with offset shadow */
+[data-design="brutalist"] button,
+[data-design="brutalist"] .btn-press {
+  border-radius: 0 !important;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+}
+
+[data-design="brutalist"] button:active,
+[data-design="brutalist"] .btn-press:active {
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+  transform: translate(2px, 2px);
+}
+
+/* Table rows */
+[data-design="brutalist"] .row-hover {
+  border-left: 4px solid transparent;
+}
+
+[data-design="brutalist"] .row-hover:hover {
+  background: rgba(183, 102, 255, 0.12);
+  border-left-color: #B766FF;
+  box-shadow: inset 0 0 0 1px rgba(183, 102, 255, 0.2);
+}
+
+/* Skeleton - Harsh shimmer */
+[data-design="brutalist"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(183, 102, 255, 0.05) 0%,
+    rgba(255, 61, 154, 0.15) 50%,
+    rgba(183, 102, 255, 0.05) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 0;
+  animation: skeleton-shimmer 1s linear infinite;
+}
+
+/* Input fields */
+[data-design="brutalist"] input,
+[data-design="brutalist"] select {
+  border-radius: 0 !important;
+  border: 2px solid rgba(183, 102, 255, 0.3) !important;
+}
+
+[data-design="brutalist"] input:focus,
+[data-design="brutalist"] select:focus {
+  border-color: rgba(183, 102, 255, 0.7) !important;
+  box-shadow: 3px 3px 0 rgba(183, 102, 255, 0.3);
+}
+
+/* Status badges */
+[data-design="brutalist"] .badge-new,
+[data-design="brutalist"] .badge-hot {
+  border-radius: 0;
+  border-width: 2px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Animated grid - More visible */
+[data-design="brutalist"] .animated-grid-bg {
+  background-image:
+    linear-gradient(rgba(183, 102, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(183, 102, 255, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Glow effects - Sharp edged */
+[data-design="brutalist"] .glow-bonk {
+  box-shadow:
+    0 0 0 2px rgba(183, 102, 255, 0.4),
+    8px 8px 0 rgba(183, 102, 255, 0.2);
+}
+
+[data-design="brutalist"] .text-glow-bonk {
+  text-shadow:
+    2px 2px 0 rgba(183, 102, 255, 0.8),
+    -1px -1px 0 rgba(255, 61, 154, 0.5);
+}
+
+/* Scrollbar - Square */
+[data-design="brutalist"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: rgba(183, 102, 255, 0.4);
+}
+
+[data-design="brutalist"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(183, 102, 255, 0.7);
+}

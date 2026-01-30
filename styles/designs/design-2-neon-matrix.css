@@ -1,0 +1,248 @@
+/* ============================================
+   DESIGN 2: NEON MATRIX
+   Sharp corners, neon green + purple, cyberpunk
+   ============================================ */
+
+:root[data-design="neon-matrix"] {
+  /* Base palette - Deep black with green tint */
+  --background: #050A05;
+  --background-elevated: #0A150A;
+  --background-subtle: #0F1F0F;
+  --foreground: #E0FFE0;
+  --foreground-muted: #7FBF7F;
+
+  /* Card system - Matrix green glow */
+  --card: rgba(10, 21, 10, 0.9);
+  --card-hover: rgba(15, 31, 15, 0.95);
+  --card-foreground: #E0FFE0;
+
+  /* Accent colors - Neon Green + Purple fusion */
+  --bonk: #00FF41;
+  --bonk-secondary: #BF40FF;
+  --bonk-glow: rgba(0, 255, 65, 0.5);
+  --bonk-subtle: rgba(0, 255, 65, 0.1);
+
+  /* Status colors */
+  --success: #00FF41;
+  --success-glow: rgba(0, 255, 65, 0.5);
+  --danger: #FF0040;
+  --danger-glow: rgba(255, 0, 64, 0.5);
+
+  /* Border system - Neon glow */
+  --border: rgba(0, 255, 65, 0.3);
+  --border-hover: rgba(0, 255, 65, 0.6);
+  --border-active: rgba(191, 64, 255, 0.8);
+
+  /* ZERO RADIUS */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-chamfer: 0px;
+  --radius-chamfer-sm: 0px;
+  --radius-chamfer-lg: 0px;
+  --radius-chamfer-xl: 0px;
+}
+
+[data-design="neon-matrix"] body {
+  background: #050A05;
+}
+
+[data-design="neon-matrix"] .glass-card {
+  background: rgba(10, 21, 10, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  border-radius: 0;
+  box-shadow:
+    0 0 20px rgba(0, 255, 65, 0.1),
+    inset 0 0 30px rgba(0, 255, 65, 0.02);
+}
+
+[data-design="neon-matrix"] .glass-card:hover {
+  background: rgba(15, 31, 15, 0.9);
+  border-color: rgba(0, 255, 65, 0.6);
+  box-shadow:
+    0 0 30px rgba(0, 255, 65, 0.2),
+    0 0 60px rgba(191, 64, 255, 0.1),
+    inset 0 0 40px rgba(0, 255, 65, 0.03);
+}
+
+[data-design="neon-matrix"] .glass-card-elevated {
+  background: rgba(10, 21, 10, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 255, 65, 0.4);
+  border-radius: 0;
+  box-shadow:
+    0 0 40px rgba(0, 255, 65, 0.15),
+    0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+[data-design="neon-matrix"] .glass-card-premium {
+  background: rgba(10, 21, 10, 0.95);
+  border-radius: 0;
+}
+
+[data-design="neon-matrix"] .glass-card-premium::before {
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 255, 65, 0.7) 0%,
+    rgba(191, 64, 255, 0.5) 50%,
+    rgba(0, 255, 65, 0.7) 100%
+  );
+}
+
+/* Champion card - Matrix style */
+[data-design="neon-matrix"] .card-champion {
+  background: linear-gradient(135deg, rgba(10, 21, 10, 0.98) 0%, rgba(15, 31, 15, 0.98) 100%);
+  border-radius: 0;
+}
+
+[data-design="neon-matrix"] .card-champion::before {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(0, 255, 65, 0.9) 0%,
+    rgba(191, 64, 255, 0.7) 50%,
+    rgba(0, 255, 65, 0.9) 100%
+  );
+}
+
+[data-design="neon-matrix"] .card-champion::after {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(0, 255, 65, 0.4) 0%,
+    rgba(191, 64, 255, 0.3) 50%,
+    rgba(0, 255, 65, 0.4) 100%
+  );
+}
+
+/* Animated grid - Matrix rain effect */
+[data-design="neon-matrix"] .animated-grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 255, 65, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 65, 0.05) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+/* Particles - Green */
+[data-design="neon-matrix"] .particle {
+  background: #00FF41;
+  box-shadow: 0 0 10px #00FF41;
+}
+
+[data-design="neon-matrix"] .particle:nth-child(even) {
+  background: #BF40FF;
+  box-shadow: 0 0 10px #BF40FF;
+}
+
+/* Blob gradients */
+[data-design="neon-matrix"] .blob-float,
+[data-design="neon-matrix"] .blob-float-reverse,
+[data-design="neon-matrix"] .blob-float-slow {
+  filter: hue-rotate(90deg);
+}
+
+/* Table rows */
+[data-design="neon-matrix"] .row-hover {
+  border-left: 3px solid transparent;
+}
+
+[data-design="neon-matrix"] .row-hover:hover {
+  background: rgba(0, 255, 65, 0.08);
+  border-left-color: #00FF41;
+}
+
+/* Glow effects */
+[data-design="neon-matrix"] .glow-bonk {
+  box-shadow:
+    0 0 20px rgba(0, 255, 65, 0.3),
+    0 0 40px rgba(0, 255, 65, 0.15),
+    0 0 60px rgba(191, 64, 255, 0.1);
+}
+
+[data-design="neon-matrix"] .text-glow-bonk {
+  text-shadow:
+    0 0 10px rgba(0, 255, 65, 0.9),
+    0 0 20px rgba(0, 255, 65, 0.6),
+    0 0 40px rgba(191, 64, 255, 0.4);
+}
+
+[data-design="neon-matrix"] .text-glow-success {
+  text-shadow:
+    0 0 10px rgba(0, 255, 65, 0.9),
+    0 0 20px rgba(0, 255, 65, 0.6);
+}
+
+/* Buttons */
+[data-design="neon-matrix"] button,
+[data-design="neon-matrix"] .btn-press {
+  border-radius: 0 !important;
+}
+
+/* Input fields */
+[data-design="neon-matrix"] input,
+[data-design="neon-matrix"] select {
+  border-radius: 0 !important;
+  border-color: rgba(0, 255, 65, 0.3) !important;
+  color: #E0FFE0;
+}
+
+[data-design="neon-matrix"] input:focus,
+[data-design="neon-matrix"] select:focus {
+  border-color: rgba(0, 255, 65, 0.6) !important;
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+}
+
+[data-design="neon-matrix"] input::placeholder {
+  color: rgba(0, 255, 65, 0.4);
+}
+
+/* Skeleton */
+[data-design="neon-matrix"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 255, 65, 0.03) 0%,
+    rgba(0, 255, 65, 0.1) 50%,
+    rgba(0, 255, 65, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 0;
+}
+
+/* Status badges */
+[data-design="neon-matrix"] .badge-new {
+  color: #00FF41;
+  background: rgba(0, 255, 65, 0.15);
+  border: 1px solid rgba(0, 255, 65, 0.4);
+  border-radius: 0;
+}
+
+[data-design="neon-matrix"] .badge-hot {
+  color: #FF0040;
+  background: rgba(255, 0, 64, 0.15);
+  border: 1px solid rgba(255, 0, 64, 0.4);
+  border-radius: 0;
+}
+
+/* Scrollbar */
+[data-design="neon-matrix"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: rgba(0, 255, 65, 0.3);
+}
+
+[data-design="neon-matrix"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 65, 0.5);
+}
+
+/* Selection */
+[data-design="neon-matrix"] ::selection {
+  background: rgba(0, 255, 65, 0.4);
+  color: #ffffff;
+}
+
+/* Liquidity bar */
+[data-design="neon-matrix"] .liq-bar-fill {
+  background: linear-gradient(90deg, #00FF41 0%, #BF40FF 100%);
+}

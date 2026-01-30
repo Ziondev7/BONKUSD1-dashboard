@@ -1,0 +1,283 @@
+/* ============================================
+   DESIGN 3: ICE CRYSTAL
+   Sharp corners, cyan/ice blue, arctic cold
+   ============================================ */
+
+:root[data-design="ice-crystal"] {
+  /* Base palette - Deep arctic blue */
+  --background: #030810;
+  --background-elevated: #081018;
+  --background-subtle: #0D1825;
+  --foreground: #E8F4FF;
+  --foreground-muted: #7EB8E8;
+
+  /* Card system - Frosted glass */
+  --card: rgba(8, 16, 24, 0.85);
+  --card-hover: rgba(13, 24, 37, 0.9);
+  --card-foreground: #E8F4FF;
+
+  /* Accent colors - Ice cyan + purple highlights */
+  --bonk: #00D4FF;
+  --bonk-secondary: #8B5CF6;
+  --bonk-glow: rgba(0, 212, 255, 0.5);
+  --bonk-subtle: rgba(0, 212, 255, 0.1);
+
+  /* Status colors - Cold tones */
+  --success: #00F5D4;
+  --success-glow: rgba(0, 245, 212, 0.5);
+  --danger: #FF3366;
+  --danger-glow: rgba(255, 51, 102, 0.5);
+
+  /* Border system - Icy glow */
+  --border: rgba(0, 212, 255, 0.25);
+  --border-hover: rgba(0, 212, 255, 0.5);
+  --border-active: rgba(139, 92, 246, 0.7);
+
+  /* ZERO RADIUS */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-chamfer: 0px;
+  --radius-chamfer-sm: 0px;
+  --radius-chamfer-lg: 0px;
+  --radius-chamfer-xl: 0px;
+}
+
+[data-design="ice-crystal"] body {
+  background: #030810;
+}
+
+[data-design="ice-crystal"] .glass-card {
+  background: rgba(8, 16, 24, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 0;
+  box-shadow:
+    0 4px 30px rgba(0, 212, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+[data-design="ice-crystal"] .glass-card:hover {
+  background: rgba(13, 24, 37, 0.85);
+  border-color: rgba(0, 212, 255, 0.4);
+  box-shadow:
+    0 8px 40px rgba(0, 212, 255, 0.1),
+    0 0 60px rgba(139, 92, 246, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+[data-design="ice-crystal"] .glass-card-elevated {
+  background: rgba(8, 16, 24, 0.92);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 0;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 0 40px rgba(0, 212, 255, 0.08);
+}
+
+[data-design="ice-crystal"] .glass-card-premium {
+  background: rgba(8, 16, 24, 0.95);
+  border-radius: 0;
+}
+
+[data-design="ice-crystal"] .glass-card-premium::before {
+  border-radius: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(0, 212, 255, 0.6) 0%,
+    rgba(139, 92, 246, 0.4) 50%,
+    rgba(0, 212, 255, 0.6) 100%
+  );
+}
+
+/* Champion card - Crystal style */
+[data-design="ice-crystal"] .card-champion {
+  background: linear-gradient(135deg, rgba(8, 16, 24, 0.98) 0%, rgba(13, 24, 37, 0.98) 100%);
+  border-radius: 0;
+}
+
+[data-design="ice-crystal"] .card-champion::before {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(0, 212, 255, 0.9) 0%,
+    rgba(139, 92, 246, 0.7) 25%,
+    rgba(0, 245, 212, 0.8) 50%,
+    rgba(139, 92, 246, 0.7) 75%,
+    rgba(0, 212, 255, 0.9) 100%
+  );
+}
+
+[data-design="ice-crystal"] .card-champion::after {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(0, 212, 255, 0.4) 0%,
+    rgba(139, 92, 246, 0.3) 50%,
+    rgba(0, 212, 255, 0.4) 100%
+  );
+}
+
+/* Animated grid - Ice grid */
+[data-design="ice-crystal"] .animated-grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.04) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Particles - Ice shards */
+[data-design="ice-crystal"] .particle {
+  background: #00D4FF;
+  box-shadow: 0 0 8px #00D4FF;
+}
+
+[data-design="ice-crystal"] .particle:nth-child(even) {
+  background: #8B5CF6;
+  box-shadow: 0 0 8px #8B5CF6;
+}
+
+/* Blob gradients - Icy */
+[data-design="ice-crystal"] .blob-float {
+  background: radial-gradient(ellipse at center, rgba(0, 212, 255, 0.12) 0%, transparent 60%) !important;
+}
+
+[data-design="ice-crystal"] .blob-float-reverse {
+  background: radial-gradient(ellipse at center, rgba(139, 92, 246, 0.08) 0%, transparent 60%) !important;
+}
+
+[data-design="ice-crystal"] .blob-float-slow {
+  background: radial-gradient(ellipse at center, rgba(0, 245, 212, 0.06) 0%, transparent 60%) !important;
+}
+
+/* Table rows */
+[data-design="ice-crystal"] .row-hover {
+  border-left: 3px solid transparent;
+}
+
+[data-design="ice-crystal"] .row-hover:hover {
+  background: rgba(0, 212, 255, 0.06);
+  border-left-color: #00D4FF;
+}
+
+/* Glow effects - Icy glow */
+[data-design="ice-crystal"] .glow-bonk {
+  box-shadow:
+    0 0 30px rgba(0, 212, 255, 0.25),
+    0 0 60px rgba(139, 92, 246, 0.15);
+}
+
+[data-design="ice-crystal"] .text-glow-bonk {
+  text-shadow:
+    0 0 10px rgba(0, 212, 255, 0.9),
+    0 0 20px rgba(0, 212, 255, 0.6),
+    0 0 40px rgba(139, 92, 246, 0.4);
+}
+
+[data-design="ice-crystal"] .text-glow-success {
+  text-shadow:
+    0 0 10px rgba(0, 245, 212, 0.9),
+    0 0 20px rgba(0, 245, 212, 0.6);
+}
+
+[data-design="ice-crystal"] .text-glow-danger {
+  text-shadow:
+    0 0 10px rgba(255, 51, 102, 0.9),
+    0 0 20px rgba(255, 51, 102, 0.6);
+}
+
+/* Buttons */
+[data-design="ice-crystal"] button,
+[data-design="ice-crystal"] .btn-press {
+  border-radius: 0 !important;
+}
+
+/* Input fields */
+[data-design="ice-crystal"] input,
+[data-design="ice-crystal"] select {
+  border-radius: 0 !important;
+  border-color: rgba(0, 212, 255, 0.25) !important;
+  color: #E8F4FF;
+}
+
+[data-design="ice-crystal"] input:focus,
+[data-design="ice-crystal"] select:focus {
+  border-color: rgba(0, 212, 255, 0.5) !important;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
+}
+
+[data-design="ice-crystal"] input::placeholder {
+  color: rgba(0, 212, 255, 0.4);
+}
+
+/* Skeleton - Ice shimmer */
+[data-design="ice-crystal"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 212, 255, 0.03) 0%,
+    rgba(139, 92, 246, 0.08) 50%,
+    rgba(0, 212, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 0;
+}
+
+/* Status badges */
+[data-design="ice-crystal"] .badge-new {
+  color: #00F5D4;
+  background: rgba(0, 245, 212, 0.12);
+  border: 1px solid rgba(0, 245, 212, 0.35);
+  border-radius: 0;
+}
+
+[data-design="ice-crystal"] .badge-hot {
+  color: #FF3366;
+  background: rgba(255, 51, 102, 0.12);
+  border: 1px solid rgba(255, 51, 102, 0.35);
+  border-radius: 0;
+}
+
+/* Scrollbar */
+[data-design="ice-crystal"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: rgba(0, 212, 255, 0.25);
+}
+
+[data-design="ice-crystal"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.45);
+}
+
+/* Selection */
+[data-design="ice-crystal"] ::selection {
+  background: rgba(0, 212, 255, 0.4);
+  color: #ffffff;
+}
+
+/* Liquidity bar */
+[data-design="ice-crystal"] .liq-bar-fill {
+  background: linear-gradient(90deg, #00F5D4 0%, #00D4FF 50%, #8B5CF6 100%);
+}
+
+/* Elite card */
+[data-design="ice-crystal"] .elite-card::before {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 212, 255, 0.5) 0%,
+    rgba(139, 92, 246, 0.3) 50%,
+    transparent 70%
+  );
+  border-radius: 0;
+}
+
+/* Gradient border */
+[data-design="ice-crystal"] .gradient-border::before {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 212, 255, 0.6) 0%,
+    rgba(139, 92, 246, 0.4) 50%,
+    rgba(0, 212, 255, 0.6) 100%
+  );
+}

@@ -1,0 +1,289 @@
+/* ============================================
+   DESIGN 4: CYBER GOLD
+   Sharp corners, amber/gold + purple, luxury tech
+   ============================================ */
+
+:root[data-design="cyber-gold"] {
+  /* Base palette - Deep warm black */
+  --background: #0A0806;
+  --background-elevated: #12100C;
+  --background-subtle: #1A1712;
+  --foreground: #FFF8E8;
+  --foreground-muted: #C9A86C;
+
+  /* Card system - Warm gold tint */
+  --card: rgba(18, 16, 12, 0.9);
+  --card-hover: rgba(26, 23, 18, 0.95);
+  --card-foreground: #FFF8E8;
+
+  /* Accent colors - Gold + Purple royalty */
+  --bonk: #FFB800;
+  --bonk-secondary: #9D4EDD;
+  --bonk-glow: rgba(255, 184, 0, 0.5);
+  --bonk-subtle: rgba(255, 184, 0, 0.1);
+
+  /* Status colors - Warm */
+  --success: #7FFF00;
+  --success-glow: rgba(127, 255, 0, 0.5);
+  --danger: #FF3B30;
+  --danger-glow: rgba(255, 59, 48, 0.5);
+
+  /* Border system - Gold trim */
+  --border: rgba(255, 184, 0, 0.25);
+  --border-hover: rgba(255, 184, 0, 0.5);
+  --border-active: rgba(157, 78, 221, 0.7);
+
+  /* ZERO RADIUS */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-chamfer: 0px;
+  --radius-chamfer-sm: 0px;
+  --radius-chamfer-lg: 0px;
+  --radius-chamfer-xl: 0px;
+}
+
+[data-design="cyber-gold"] body {
+  background: #0A0806;
+}
+
+[data-design="cyber-gold"] .glass-card {
+  background: rgba(18, 16, 12, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 184, 0, 0.2);
+  border-radius: 0;
+  box-shadow:
+    0 4px 24px rgba(255, 184, 0, 0.05),
+    inset 0 1px 0 rgba(255, 248, 232, 0.06);
+}
+
+[data-design="cyber-gold"] .glass-card:hover {
+  background: rgba(26, 23, 18, 0.9);
+  border-color: rgba(255, 184, 0, 0.4);
+  box-shadow:
+    0 8px 40px rgba(255, 184, 0, 0.1),
+    0 0 60px rgba(157, 78, 221, 0.08),
+    inset 0 1px 0 rgba(255, 248, 232, 0.1);
+}
+
+[data-design="cyber-gold"] .glass-card-elevated {
+  background: rgba(18, 16, 12, 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 184, 0, 0.3);
+  border-radius: 0;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 40px rgba(255, 184, 0, 0.08);
+}
+
+[data-design="cyber-gold"] .glass-card-premium {
+  background: rgba(18, 16, 12, 0.95);
+  border-radius: 0;
+}
+
+[data-design="cyber-gold"] .glass-card-premium::before {
+  border-radius: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 184, 0, 0.7) 0%,
+    rgba(157, 78, 221, 0.4) 50%,
+    rgba(255, 184, 0, 0.7) 100%
+  );
+}
+
+/* Champion card - Royal gold style */
+[data-design="cyber-gold"] .card-champion {
+  background: linear-gradient(135deg, rgba(18, 16, 12, 0.98) 0%, rgba(26, 23, 18, 0.98) 100%);
+  border-radius: 0;
+}
+
+[data-design="cyber-gold"] .card-champion::before {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(255, 184, 0, 1) 0%,
+    rgba(255, 215, 0, 0.9) 25%,
+    rgba(157, 78, 221, 0.8) 50%,
+    rgba(255, 215, 0, 0.9) 75%,
+    rgba(255, 184, 0, 1) 100%
+  );
+}
+
+[data-design="cyber-gold"] .card-champion::after {
+  border-radius: 0;
+  background: linear-gradient(
+    var(--champion-angle, 0deg),
+    rgba(255, 184, 0, 0.5) 0%,
+    rgba(157, 78, 221, 0.3) 50%,
+    rgba(255, 184, 0, 0.5) 100%
+  );
+}
+
+/* Animated grid - Gold lines */
+[data-design="cyber-gold"] .animated-grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 184, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 184, 0, 0.04) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Particles - Gold dust */
+[data-design="cyber-gold"] .particle {
+  background: #FFB800;
+  box-shadow: 0 0 8px #FFB800;
+}
+
+[data-design="cyber-gold"] .particle:nth-child(even) {
+  background: #9D4EDD;
+  box-shadow: 0 0 8px #9D4EDD;
+}
+
+/* Blob gradients - Gold/Purple */
+[data-design="cyber-gold"] .blob-float {
+  background: radial-gradient(ellipse at center, rgba(255, 184, 0, 0.1) 0%, transparent 60%) !important;
+}
+
+[data-design="cyber-gold"] .blob-float-reverse {
+  background: radial-gradient(ellipse at center, rgba(157, 78, 221, 0.08) 0%, transparent 60%) !important;
+}
+
+[data-design="cyber-gold"] .blob-float-slow {
+  background: radial-gradient(ellipse at center, rgba(255, 215, 0, 0.06) 0%, transparent 60%) !important;
+}
+
+/* Table rows */
+[data-design="cyber-gold"] .row-hover {
+  border-left: 3px solid transparent;
+}
+
+[data-design="cyber-gold"] .row-hover:hover {
+  background: rgba(255, 184, 0, 0.06);
+  border-left-color: #FFB800;
+}
+
+/* Glow effects - Golden glow */
+[data-design="cyber-gold"] .glow-bonk {
+  box-shadow:
+    0 0 30px rgba(255, 184, 0, 0.25),
+    0 0 60px rgba(157, 78, 221, 0.15);
+}
+
+[data-design="cyber-gold"] .text-glow-bonk {
+  text-shadow:
+    0 0 10px rgba(255, 184, 0, 0.9),
+    0 0 20px rgba(255, 184, 0, 0.6),
+    0 0 40px rgba(157, 78, 221, 0.4);
+}
+
+[data-design="cyber-gold"] .text-glow-success {
+  text-shadow:
+    0 0 10px rgba(127, 255, 0, 0.9),
+    0 0 20px rgba(127, 255, 0, 0.6);
+}
+
+[data-design="cyber-gold"] .text-glow-danger {
+  text-shadow:
+    0 0 10px rgba(255, 59, 48, 0.9),
+    0 0 20px rgba(255, 59, 48, 0.6);
+}
+
+/* Buttons */
+[data-design="cyber-gold"] button,
+[data-design="cyber-gold"] .btn-press {
+  border-radius: 0 !important;
+}
+
+/* Input fields */
+[data-design="cyber-gold"] input,
+[data-design="cyber-gold"] select {
+  border-radius: 0 !important;
+  border-color: rgba(255, 184, 0, 0.25) !important;
+  color: #FFF8E8;
+}
+
+[data-design="cyber-gold"] input:focus,
+[data-design="cyber-gold"] select:focus {
+  border-color: rgba(255, 184, 0, 0.5) !important;
+  box-shadow: 0 0 20px rgba(255, 184, 0, 0.15);
+}
+
+[data-design="cyber-gold"] input::placeholder {
+  color: rgba(255, 184, 0, 0.4);
+}
+
+/* Skeleton - Gold shimmer */
+[data-design="cyber-gold"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 184, 0, 0.03) 0%,
+    rgba(255, 215, 0, 0.12) 50%,
+    rgba(255, 184, 0, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 0;
+}
+
+/* Status badges */
+[data-design="cyber-gold"] .badge-new {
+  color: #7FFF00;
+  background: rgba(127, 255, 0, 0.12);
+  border: 1px solid rgba(127, 255, 0, 0.35);
+  border-radius: 0;
+}
+
+[data-design="cyber-gold"] .badge-hot {
+  color: #FF3B30;
+  background: rgba(255, 59, 48, 0.12);
+  border: 1px solid rgba(255, 59, 48, 0.35);
+  border-radius: 0;
+}
+
+/* Scrollbar */
+[data-design="cyber-gold"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: rgba(255, 184, 0, 0.25);
+}
+
+[data-design="cyber-gold"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 184, 0, 0.45);
+}
+
+/* Selection */
+[data-design="cyber-gold"] ::selection {
+  background: rgba(255, 184, 0, 0.4);
+  color: #0A0806;
+}
+
+/* Liquidity bar */
+[data-design="cyber-gold"] .liq-bar-fill {
+  background: linear-gradient(90deg, #7FFF00 0%, #FFB800 50%, #9D4EDD 100%);
+}
+
+/* Elite card */
+[data-design="cyber-gold"] .elite-card::before {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 184, 0, 0.5) 0%,
+    rgba(157, 78, 221, 0.3) 50%,
+    transparent 70%
+  );
+  border-radius: 0;
+}
+
+/* Gradient border */
+[data-design="cyber-gold"] .gradient-border::before {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 184, 0, 0.7) 0%,
+    rgba(157, 78, 221, 0.5) 50%,
+    rgba(255, 184, 0, 0.7) 100%
+  );
+}
+
+/* Focus states */
+[data-design="cyber-gold"] *:focus-visible {
+  outline: 2px solid #FFB800;
+  outline-offset: 2px;
+}
